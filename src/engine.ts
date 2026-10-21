@@ -414,9 +414,14 @@ export class RainbowEngine {
 				const cell = cells[i]!;
 				// Rows are classified from the transcript; the sidebar beside it is not part of the rule.
 				const isRule = isRuleRow && cell.region !== "sidebar";
+				const sidebar = cell.region === "sidebar";
 				const inBox = layout.rowBox[y] === true && isBoxCell(row, cell.col, bounds);
-				const backgroundBlend = inBox ? boxBlend : 0.17 * blend;
-				const paintBg = allowBg && !cell.region && !layout.rowEditor[y] && !layout.rowFooter[y] && backgroundBlend > 0 && (scope !== "panels" || inBox);
+				// Fill blocks the host painted. In OpenCode an outline with no
+				// background of its own is a markdown table: colour its text only.
+				// The sidebar is a raised panel on every row, whatever the transcript holds.
+				const filled = sidebar ? cell.bgCode !== null : inBox && !(frame.native && cell.bgCode === null);
+				const backgroundBlend = filled ? boxBlend : 0.17 * blend;
+				const paintBg = allowBg && (!cell.region || sidebar) && !layout.rowEditor[y] && !layout.rowFooter[y] && backgroundBlend > 0 && (scope !== "panels" || filled);
 				if (cell.style.inverse) continue;
 				// `chrome` is a per-cell scope, not a per-row one: a rule with a
 				// label in it should colour the rule and leave the label alone.
@@ -437,7 +442,7 @@ export class RainbowEngine {
 					// The glyph already carries the ramp undiluted; let it.
 					cell.outBg = mixRgb(this.bg, col, backgroundBlend);
 					row.dirty = true;
-				} else if (paintBg && inBox && !isRule) {
+				} else if (paintBg && filled && !isRule) {
 					cell.outBg = mixRgb(effectiveBg(cell, this.bg), col, backgroundBlend);
 					row.dirty = true;
 				}

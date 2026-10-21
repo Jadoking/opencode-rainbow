@@ -281,7 +281,8 @@ export function applyScope(frame: Frame, scope: RainbowScope, colorInput = false
 		// are the blocks worth colouring, so they override panel classification.
 		if (layout.rowBox[y]) continue;
 		row.quiet = true;
-		if (!row.cells.some((cell) => cell.text.trim())) row.skip = true;
+		// A blank transcript row still carries the sidebar's panel tint.
+		if (!row.cells.some((cell) => beside(cell) || cell.text.trim())) row.skip = true;
 	}
 
 	return layout;

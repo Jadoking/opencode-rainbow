@@ -105,15 +105,19 @@ function sidebarFixture(sidebarText: boolean) {
 }
 const sidebarRegion = [{ x: 20, y: 0, width: 10, height: 6, kind: "sidebar" as const }];
 
-test("the session sidebar keeps its background and glyphs beside tables", () => {
+test("the session sidebar keeps its glyphs and takes the panel tint on every row beside tables", () => {
   const p = sidebarFixture(true);
+  // The gap between two transcript blocks, beside empty sidebar padding: no text anywhere on the row.
+  for (let x = 0; x < 30; x++) p.char[5 * 30 + x] = 32;
   const original = structuredClone(p);
   const s = settings({ scope: "panels", colorFooter: true, frameBudgetMs: 0, fx: Object.fromEntries(allFx().map((f) => [f.id, 1])) });
   render(p, s, sidebarRegion);
   for (let y = 0; y < 6; y++) {
     const start = y * 30 + 20, end = start + 10;
     assert.deepEqual(p.char.slice(start, end), original.char.slice(start, end), `row ${y} sidebar glyphs`);
-    assert.deepEqual(p.bg.slice(start * 4, end * 4), original.bg.slice(start * 4, end * 4), `row ${y} sidebar background`);
+    assert.deepEqual(p.attributes.slice(start, end), original.attributes.slice(start, end), `row ${y} sidebar styles`);
+    // Rows 0, 2 and 4 sit beside table rules: they must be tinted too, or the sidebar stripes.
+    assert.notDeepEqual(p.bg.slice(start * 4, end * 4), original.bg.slice(start * 4, end * 4), `row ${y} sidebar tint`);
   }
   assert.notDeepEqual(p.fg.slice(21 * 4, 26 * 4), original.fg.slice(21 * 4, 26 * 4), "sidebar text still takes the gradient");
 });
@@ -146,7 +150,28 @@ test("tables in the transcript never change how sidebar text is coloured", () =>
   for (let y = 0; y < 6; y++) {
     const start = y * 30 + 20, end = start + 10;
     assert.deepEqual(withTable.fg.slice(start * 4, end * 4), without.fg.slice(start * 4, end * 4), `row ${y} sidebar text`);
+    assert.deepEqual(withTable.bg.slice(start * 4, end * 4), without.bg.slice(start * 4, end * 4), `row ${y} sidebar tint`);
     assert.deepEqual(withTable.attributes.slice(start, end), without.attributes.slice(start, end), `row ${y} sidebar styles`);
+  }
+});
+
+test("tables keep their own background while their text takes the gradient", () => {
+  for (const scope of ["panels", "screen"] as const) {
+    // The same text with its borders removed is plain prose: the table must get the same background.
+    const [table, prose] = [sidebarFixture(false), sidebarFixture(false)];
+    for (let i = 0; i < prose.char.length; i++) if (/[─│┌┐└┘├┤]/.test(String.fromCodePoint(prose.char[i]!))) prose.char[i] = 32;
+    const original = structuredClone(table);
+    const s = settings({ scope, boxBlend: 1, frameBudgetMs: 0 });
+    for (const p of [table, prose]) {
+      const engine = new RainbowEngine(s);
+      Object.defineProperty(engine, "now", { get: () => 1 });
+      processNativeFrame({ buffers: p, width: 30, height: 6 }, engine, s, { inputMode: "base", regions: sidebarRegion });
+    }
+    for (const y of [1, 3]) {
+      const start = y * 30 + 1, end = y * 30 + 19;
+      assert.deepEqual(table.bg.slice(start * 4, end * 4), prose.bg.slice(start * 4, end * 4), `${scope} row ${y} table fill`);
+    }
+    assert.notDeepEqual(table.fg.slice(32 * 4, 37 * 4), original.fg.slice(32 * 4, 37 * 4), `${scope} table text still coloured`);
   }
 });
 

@@ -107,7 +107,8 @@ export function writeFrame(planes: Planes, frame: Frame, settings: RainbowSettin
       for (let k = 0; k < cell.width; k++) {
         const at = (i + k) * 4;
         if (cell.outFg && !equal(cell.outFg, cell.fg)) putColor(planes.fg, at, cell.outFg);
-        if (!textOnly && cell.outBg && !equal(cell.outBg, cell.bg)) putColor(planes.bg, at, cell.outBg);
+        // The sidebar keeps its glyphs and styles but takes the panel tint.
+        if ((!textOnly || cell.region === "sidebar") && cell.outBg && !equal(cell.outBg, cell.bg)) putColor(planes.bg, at, cell.outBg);
         if (!textOnly) planes.attributes[i + k] = (planes.attributes[i + k] & ~15) |
           Number(cell.outBold) | Number(cell.outDim) << 1 | Number(cell.outItalic) << 2 | Number(cell.outUnderline) << 3;
       }
