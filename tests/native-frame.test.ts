@@ -75,6 +75,34 @@ test("selected text and protected images are byte-for-byte unchanged", () => {
   }
 });
 
+// OpenTUI's drawImage marks every cell it covers: flag 0b01 in the top bits over a space.
+const IMAGE_CELL = 0x40000020;
+
+test("image cells are untouched wherever they are, and nothing else is held back", () => {
+  const p = fixture();
+  for (let y = 1; y < 4; y++) for (let x = 2; x < 8; x++) {
+    p.char[y * 30 + x] = IMAGE_CELL;
+    p.fg.set([255, 255, 255, 255], (y * 30 + x) * 4);
+  }
+  const original = structuredClone(p);
+  render(p, settings({ scope: "screen", fx: Object.fromEntries(allFx().map((f) => [f.id, 1])) }));
+  for (let y = 1; y < 4; y++) {
+    const start = y * 30 + 2, end = y * 30 + 8;
+    assert.deepEqual(p.char.slice(start, end), original.char.slice(start, end), `row ${y} image glyphs`);
+    assert.deepEqual(p.attributes.slice(start, end), original.attributes.slice(start, end), `row ${y} image styles`);
+    assert.deepEqual(p.fg.slice(start * 4, end * 4), original.fg.slice(start * 4, end * 4), `row ${y} image fg`);
+    assert.deepEqual(p.bg.slice(start * 4, end * 4), original.bg.slice(start * 4, end * 4), `row ${y} image bg`);
+  }
+  assert.notDeepEqual(p.bg.slice(4 * 30 * 4, 5 * 30 * 4), original.bg.slice(4 * 30 * 4, 5 * 30 * 4), "the row below the image is tinted");
+});
+
+test("an image element's layout box is not a protected region", () => {
+  // Its reported box can sit over other content once it scrolls out of view.
+  const image = { id: "image-3", screenX: 2, screenY: 0, width: 12, height: 8, zIndex: 0, visible: true,
+    parent: null, getChildren: () => [] } as unknown as Renderable;
+  assert.deepEqual(collectRegions(image, []), []);
+});
+
 test("region detection works with minified OpenCode classes and model footer siblings", () => {
   const node = (id: string, y: number, h = 1) => ({ id, screenX: 2, screenY: y, width: 20, height: h,
     visible: true, parent: null, constructor: { name: "ph" }, getChildren: () => [] } as unknown as Renderable);

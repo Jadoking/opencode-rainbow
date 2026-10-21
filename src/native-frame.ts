@@ -8,6 +8,8 @@ import type { RainbowSettings } from "./settings.js";
 export type Region = { x: number; y: number; width: number; height: number; kind: "input" | "footer" | "sidebar" | "protected" };
 export type Planes = OptimizedBuffer["buffers"];
 const continuation = (cp: number) => (cp >>> 30) === 3;
+/** OpenTUI's drawImage flags each covered cell in the top bits; the terminal draws the picture there. */
+const imageCell = (cp: number) => (cp >>> 30) === 1;
 const rgb = (plane: Uint16Array, at: number): RGB => ({ r: plane[at] & 255, g: plane[at + 1] & 255, b: plane[at + 2] & 255 });
 const equal = (a: RGB | null, b: RGB | null) => a === b || !!a && !!b && a.r === b.r && a.g === b.g && a.b === b.b;
 const code = (c: RGB) => `48;2;${c.r};${c.g};${c.b}`;
@@ -54,7 +56,7 @@ export function readFrame(planes: Planes, width: number, height: number, backgro
     for (let x = 0; x < used; x++) {
       const i = y * width + x;
       const cp = planes.char[i];
-      if (continuation(cp)) continue;
+      if (continuation(cp) || imageCell(cp)) continue;
       const region = bands.findLast((r) => x >= r.x && x < r.x + r.width)?.kind;
       const attrs = planes.attributes[i];
       if (region === "protected" || (attrs & (32 | 64)) ||
@@ -158,7 +160,9 @@ export function collectRegions(root: Renderable, footers: Iterable<Renderable>, 
       rect(node, "input");
     }
     if (node.id === "prompt.footer.location" && node.parent?.parent) rect(node.parent.parent, "footer");
-    if (/^(image|terminal)-/.test(node.id)) { rect(node, "protected"); return; }
+    // Images are protected cell by cell in readFrame: an image element's box
+    // can be left over other content once it scrolls out of view.
+    if (node.id.startsWith("terminal-")) { rect(node, "protected"); return; }
     for (const child of node.getChildren()) visit(child);
   };
   visit(root);
