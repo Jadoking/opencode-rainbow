@@ -34,6 +34,12 @@ export type ProcessOptions = {
 	fullscreen: boolean;
 	cursor?: { x: number; y: number } | null;
 	overlayVisible?: boolean;
+	/**
+	 * False for a host redraw between animation ticks. The scene is drawn at
+	 * the last tick's time, so unchanged cells repeat their colours and the
+	 * host's diff has nothing to send for them. Defaults to true.
+	 */
+	advance?: boolean;
 };
 
 export type FrameStats = {
@@ -75,6 +81,10 @@ export class RainbowEngine {
 	private store = new Map<string, unknown>();
 	private events: FxEvent[] = [];
 	private rng = makeRng(0x1f2e3d4c);
+	/** Seed for this tick's effect randomness; redraws replay the same sequence. */
+	private tickSeed = 0;
+	/** Activity level the current tick was drawn with. */
+	private tickEnergy = 0;
 	private frameNo = 0;
 	private parsedLines = new Map<string, AnsiGridLine>();
 
@@ -135,10 +145,10 @@ export class RainbowEngine {
 		this.fadeStart = -1;
 	}
 
-	private currentRamp(): Ramp {
+	private currentRamp(now = this.now): Ramp {
 		const fade = this.settings.presetFade;
 		if (this.fadeStart < 0 || fade <= 0) return this.rampTo;
-		const t = (this.now - this.fadeStart) / fade;
+		const t = (now - this.fadeStart) / fade;
 		if (t >= 1) {
 			this.fadeStart = -1;
 			return this.rampTo;
@@ -182,7 +192,7 @@ export class RainbowEngine {
 			if (this.quality < 1 && layer.cost >= 3 && this.quality < 0.7) continue;
 			if (this.quality < 0.45 && layer.cost >= 2) continue;
 			let level = base * s.chaos;
-			if (s.reactive) level *= 1 + this.energy * 0.35;
+			if (s.reactive) level *= 1 + this.tickEnergy * 0.35;
 			if (s.reducedMotion) level *= 0.5;
 			out.push({ layer, level: clamp01(level) });
 		}
@@ -213,18 +223,22 @@ export class RainbowEngine {
 		}
 
 		const started = performance.now();
-		const now = this.now;
-		const elapsed = this.lastFrameAt === null ? 0 : Math.max(0, now - this.lastFrameAt);
-		const dt = this.lastFrameAt === null ? 1 / 60 : Math.min(0.2, elapsed);
-		this.lastFrameAt = now;
-		this.frameNo++;
-
-		// Energy decays unless something keeps poking it.
-		const decay = Math.exp(-dt * 0.6);
-		this.energy *= decay;
+		const advance = opts.advance !== false || this.lastFrameAt === null;
+		const now = advance ? this.now : this.lastFrameAt!;
+		const elapsed = !advance || this.lastFrameAt === null ? 0 : Math.max(0, now - this.lastFrameAt);
+		const dt = this.lastFrameAt === null ? 1 / 60 : advance ? Math.min(0.2, elapsed) : 0;
+		if (advance) {
+			this.lastFrameAt = now;
+			this.frameNo++;
+			this.tickSeed = Math.floor(this.rng() * 0x100000000);
+			// Energy decays unless something keeps poking it.
+			this.energy *= Math.exp(-dt * 0.6);
+			this.tickEnergy = this.energy;
+		}
+		const energy = this.tickEnergy;
 
 		// Optional automatic preset rotation.
-		if (s.presetCycle > 0 && now - this.presetCycledAt > s.presetCycle) {
+		if (advance && s.presetCycle > 0 && now - this.presetCycledAt > s.presetCycle) {
 			this.presetCycledAt = now;
 			this.cycleRandomPreset();
 		}
@@ -236,7 +250,7 @@ export class RainbowEngine {
 		const overlayVisible = Boolean(opts.overlayVisible);
 		const calm = overlayVisible && s.calmOnOverlay;
 
-		const speed = s.speed * (s.reactive ? 1 + this.energy * 1.2 : 1) * (s.reducedMotion ? 0.35 : 1);
+		const speed = s.speed * (s.reactive ? 1 + energy * 1.2 : 1) * (s.reducedMotion ? 0.35 : 1);
 		// Integrate speed per frame; changing it must not rescale the session's age.
 		this.gradientPhase += elapsed * speed;
 		const field: FieldState = makeFieldState({
@@ -252,13 +266,13 @@ export class RainbowEngine {
 			seed: 1337,
 		});
 
-		const ramp = this.currentRamp();
+		const ramp = this.currentRamp(now);
 		const tuning: FxTuning = {
 			ramp,
 			field,
 			bg: this.bg,
 			fg: this.fg,
-			energy: this.energy,
+			energy,
 			chaos: s.chaos,
 			overlayVisible,
 			reducedMotion: s.reducedMotion,
@@ -299,7 +313,7 @@ export class RainbowEngine {
 				events: this.events,
 				tuning,
 				store: this.store,
-				rnd: this.rng,
+				rnd: makeRng(this.tickSeed),
 			};
 			const layers = this.enabledLayers();
 			for (const { layer, level } of layers) {
@@ -336,6 +350,8 @@ export class RainbowEngine {
 		this.stats.frames++;
 		this.stats.cells = width * frame.rows.length;
 		this.stats.avgMs = this.stats.avgMs === 0 ? ms : this.stats.avgMs * 0.9 + ms * 0.1;
+		// Only ticks adapt quality, so a redraw can't switch effects on or off.
+		if (!advance) return;
 		if (s.frameBudgetMs > 0) {
 			if (ms > s.frameBudgetMs * 1.5) {
 				this.quality = Math.max(0.3, this.quality - 0.12);

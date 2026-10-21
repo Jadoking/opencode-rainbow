@@ -16,14 +16,14 @@ const code = (c: RGB) => `48;2;${c.r};${c.g};${c.b}`;
 
 export function processNativeFrame(buffer: Pick<OptimizedBuffer, "buffers" | "width" | "height">,
   engine: RainbowEngine, settings: RainbowSettings,
-  options: { inputMode: string; regions: Region[]; cursor?: ProcessOptions["cursor"] }) {
+  options: { inputMode: string; regions: Region[]; cursor?: ProcessOptions["cursor"]; advance?: boolean }) {
   // Autocomplete has no dimmed backdrop. Treating it like a modal makes the
   // entire palette jump each time '/' opens the suggestions.
   const overlayVisible = options.inputMode !== "base" && options.inputMode !== "autocomplete";
   const frame = readFrame(buffer.buffers, buffer.width, buffer.height,
     overlayVisible ? frameBackground(buffer.buffers) : engine.bg, settings, options.regions);
   engine.processFrame(frame, { width: buffer.width, height: buffer.height, fullscreen: true,
-    cursor: options.cursor, overlayVisible });
+    cursor: options.cursor, overlayVisible, advance: options.advance });
   writeFrame(buffer.buffers, frame, settings);
 }
 

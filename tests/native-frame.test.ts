@@ -125,6 +125,32 @@ test("region detection works with minified OpenCode classes and model footer sib
   assert.ok(regions.some((r) => r.kind === "footer" && r.y === 4 && r.height === 2));
 });
 
+test("host redraws between animation ticks repeat the tick's colours exactly", () => {
+  const s = settings({ scope: "screen", motion: "scroll", speed: 1, reactive: true, frameBudgetMs: 0,
+    fx: Object.fromEntries(allFx().map((f) => [f.id, 0.8])) });
+  const engine = new RainbowEngine(s);
+  let now = 5;
+  Object.defineProperty(engine, "now", { get: () => now });
+  const source = fixture();
+  for (let x = 0; x < 30; x++) { source.char[30 + x] = 65 + x % 26; source.char[90 + x] = 97 + x % 26; }
+  const frame = (advance: boolean) => {
+    const p = structuredClone(source);
+    processNativeFrame({ buffers: p, width: 30, height: 6 }, engine, s, { inputMode: "base", regions: [], advance });
+    return p;
+  };
+  frame(true);
+  now = 5.5;
+  const tick = frame(true);
+  for (const t of [5.52, 5.55, 5.58]) {
+    now = t;
+    engine.pulse(1);
+    engine.emit({ kind: "ripple", x: 3, y: 2, strength: 1 });
+    assert.deepEqual(frame(false), tick, `redraw at ${t}s`);
+  }
+  now = 5.6;
+  assert.notDeepEqual(frame(true), tick, "the next tick still animates");
+});
+
 // A table in the transcript beside the session sidebar, which OpenCode paints
 // with its own raised background.
 function sidebarFixture(sidebarText: boolean) {

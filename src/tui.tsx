@@ -42,7 +42,10 @@ export default Plugin.define({
         const route = ctx.ui.router.current();
         return route.type === "session" && ctx.data.session.family(route.sessionID).some((id) => ctx.data.session.status(id) === "running");
       };
-      const pump = new AnimationPump(engine, settings, working, () => ctx.renderer.requestRender());
+      // Only the pump's ticks move the animation. OpenCode redraws far more
+      // often while a session works; those replay the last tick unchanged.
+      let tickDue = true;
+      const pump = new AnimationPump(engine, settings, working, () => { tickDue = true; ctx.renderer.requestRender(); });
       const activity = (strength = 0) => {
         pump.activity(strength);
         if (strength && settings().reactive) {
@@ -63,6 +66,7 @@ export default Plugin.define({
         failed = false;
         pump.suspended = suspended;
         activity();
+        tickDue = true;
         ctx.renderer.requestRender();
       }));
       const suspend = (value: boolean) => { suspended = value; pump.suspended = value; pump.refresh(); ctx.renderer.requestRender(); };
@@ -99,8 +103,9 @@ export default Plugin.define({
           const cursor = ctx.renderer.getCursorState();
           processNativeFrame(buffer, engine, s, {
             inputMode: ctx.keymap.mode.current(), regions: collectRegions(ctx.renderer.root, footers, sidebars),
-            cursor: cursor.visible ? { x: cursor.x - 1, y: cursor.y - 1 } : null,
+            cursor: cursor.visible ? { x: cursor.x - 1, y: cursor.y - 1 } : null, advance: tickDue,
           });
+          tickDue = false;
         } catch (error) {
           failed = true;
           pump.suspended = true;
