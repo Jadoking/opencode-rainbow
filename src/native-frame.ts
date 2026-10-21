@@ -5,7 +5,7 @@ import { padCell, type Frame, type FrameCell, type FrameRow } from "./frame.js";
 import { isChromeGlyph } from "./layout.js";
 import type { RainbowSettings } from "./settings.js";
 
-export type Region = { x: number; y: number; width: number; height: number; kind: "input" | "footer" | "protected" };
+export type Region = { x: number; y: number; width: number; height: number; kind: "input" | "footer" | "sidebar" | "protected" };
 export type Planes = OptimizedBuffer["buffers"];
 const continuation = (cp: number) => (cp >>> 30) === 3;
 const rgb = (plane: Uint16Array, at: number): RGB => ({ r: plane[at] & 255, g: plane[at + 1] & 255, b: plane[at + 2] & 255 });
@@ -59,7 +59,7 @@ export function readFrame(planes: Planes, width: number, height: number, backgro
       const attrs = planes.attributes[i];
       if (region === "protected" || (attrs & (32 | 64)) ||
         region === "input" && (!settings.colorText || !settings.colorInput || settings.scope === "chrome") ||
-        region === "footer" && (!settings.colorText || !settings.colorFooter || settings.scope === "chrome")) continue;
+        (region === "footer" || region === "sidebar") && (!settings.colorText || !settings.colorFooter || settings.scope === "chrome")) continue;
       const cell = padCell(x);
       // Opaque pooled graphemes are treated as ink; their IDs are never rewritten.
       cell.text = cell.outText = cp === 0 ? " " : cp <= 0x10ffff ? String.fromCodePoint(cp) : "\ufffc";
@@ -115,13 +115,22 @@ export function writeFrame(planes: Planes, frame: Frame, settings: RainbowSettin
   }
 }
 
-export function collectRegions(root: Renderable, footers: Iterable<Renderable>): Region[] {
+export function collectRegions(root: Renderable, footers: Iterable<Renderable>, sidebars: Iterable<Renderable> = []): Region[] {
   const regions: Region[] = [];
   const rect = (node: Renderable, kind: Region["kind"]) => {
     if (node.visible && node.width > 0 && node.height > 0) regions.push({
       x: node.screenX, y: node.screenY, width: node.width, height: node.height, kind,
     });
   };
+  // The session sidebar has no stable ID. Climb from a marker in its footer
+  // slot through the same-width wrappers (the column adds 2+2 padding) to the
+  // column itself; its parent is the full-width row holding the transcript.
+  // Recorded first so popups and other protected regions found later win.
+  for (const marker of sidebars) {
+    let node = marker.parent;
+    while (node?.parent && node.parent !== root && node.parent.width - node.width <= 4) node = node.parent;
+    if (node && node !== root) rect(node, "sidebar");
+  }
   const visit = (node: Renderable) => {
     if (!node.visible) return;
     // OpenCode's autocomplete popup has generated IDs: recognise its raised

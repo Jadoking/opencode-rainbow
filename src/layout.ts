@@ -11,7 +11,7 @@
  * stays legible.
  */
 
-import type { Frame, FrameRow } from "./frame.js";
+import type { Frame, FrameCell, FrameRow } from "./frame.js";
 
 /** Glyphs pi (and most TUIs) use to draw a horizontal separator. */
 const RULE_CHARS = new Set(["─", "━", "═", "–", "—", "-", "▁", "▔", "_"]);
@@ -25,6 +25,13 @@ const CORNER_CHARS = new Set(["╭", "╮", "╰", "╯", "┌", "┐", "└", "
 export function isChromeGlyph(ch: string): boolean {
 	return RULE_CHARS.has(ch) || EDGE_CHARS.has(ch) || CORNER_CHARS.has(ch);
 }
+
+/**
+ * OpenCode's session sidebar shares screen rows with the transcript. Row
+ * heuristics must only see the transcript, or a table rule beside the sidebar
+ * turns sidebar text into a rule and its raised background into a filled box.
+ */
+const beside = (cell: FrameCell): boolean => cell.region === "sidebar";
 
 export type PanelKind =
 	/** The scrollback / conversation area: the biggest panel, usually on top. */
@@ -74,7 +81,7 @@ function isRuleRow(row: FrameRow): boolean {
 	let other = 0;
 	for (const cell of row.cells) {
 		const ch = cell.outText;
-		if (ch === " " || ch === "") continue;
+		if (ch === " " || ch === "" || beside(cell)) continue;
 		if (RULE_CHARS.has(ch) || CORNER_CHARS.has(ch)) rule++;
 		else other++;
 	}
@@ -84,21 +91,23 @@ function isRuleRow(row: FrameRow): boolean {
 
 /** Horizontal extent of an outlined box, including its border cells. */
 export function boxBounds(row: FrameRow): [number, number] | undefined {
-	const edges = row.cells.filter((cell) => EDGE_CHARS.has(cell.text) || CORNER_CHARS.has(cell.text));
+	const edges = row.cells.filter((cell) => !beside(cell) && (EDGE_CHARS.has(cell.text) || CORNER_CHARS.has(cell.text)));
 	const first = edges[0];
 	const last = edges.at(-1);
 	return first && last && first !== last ? [first.col, last.col] : undefined;
 }
 
 export function isBoxCell(row: FrameRow, col: number, bounds: [number, number] | undefined): boolean {
-	return row.byCol[col]?.bgCode != null ||
+	const cell = row.byCol[col];
+	if (cell && beside(cell)) return false;
+	return cell?.bgCode != null ||
 		Boolean(bounds && col >= bounds[0] && col <= bounds[1]);
 }
 
 function isBoxRow(row: FrameRow): boolean {
 	let filled = 0;
 	for (const cell of row.cells) {
-		if (cell.style.bgCode !== null) filled++;
+		if (cell.style.bgCode !== null && !beside(cell)) filled++;
 	}
 	// A handful of cells is a syntax highlight; a block is wider than that.
 	return filled >= 6 || boxBounds(row) !== undefined;
@@ -108,7 +117,7 @@ function hasChrome(row: FrameRow, isRule: boolean): boolean {
 	if (isRule) return true;
 	for (const cell of row.cells) {
 		const ch = cell.outText;
-		if (EDGE_CHARS.has(ch) || CORNER_CHARS.has(ch)) return true;
+		if (!beside(cell) && (EDGE_CHARS.has(ch) || CORNER_CHARS.has(ch))) return true;
 	}
 	return false;
 }

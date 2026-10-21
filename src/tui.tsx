@@ -24,7 +24,15 @@ export default Plugin.define({
         </Show>
       </box>;
     }
-    const slots = [ctx.ui.slot({ append: "prompt.footer.status", render: Footer }), ctx.ui.slot({ append: "home.footer.status", render: Footer })];
+    const sidebars = new Set<Renderable>();
+    function SidebarMarker() {
+      let marker: Renderable | undefined;
+      onCleanup(() => { if (marker) sidebars.delete(marker); });
+      // Absolute so it adds no gap row to the sidebar footer's column layout.
+      return <box position="absolute" width={0} height={0} ref={(node) => { marker = node; sidebars.add(node); }} />;
+    }
+    const slots = [ctx.ui.slot({ append: "prompt.footer.status", render: Footer }), ctx.ui.slot({ append: "home.footer.status", render: Footer }),
+      ctx.ui.slot({ append: "sidebar.footer", render: SidebarMarker })];
     const app = ctx.ui.slot({ append: "app", render: () => untrack(() => {
       const engine = new RainbowEngine(settings());
       let suspended = false;
@@ -90,7 +98,7 @@ export default Plugin.define({
             { r: Math.round(fg.r * 255), g: Math.round(fg.g * 255), b: Math.round(fg.b * 255) });
           const cursor = ctx.renderer.getCursorState();
           processNativeFrame(buffer, engine, s, {
-            inputMode: ctx.keymap.mode.current(), regions: collectRegions(ctx.renderer.root, footers),
+            inputMode: ctx.keymap.mode.current(), regions: collectRegions(ctx.renderer.root, footers, sidebars),
             cursor: cursor.visible ? { x: cursor.x - 1, y: cursor.y - 1 } : null,
           });
         } catch (error) {

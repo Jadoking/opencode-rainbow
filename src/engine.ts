@@ -406,12 +406,14 @@ export class RainbowEngine {
 		for (let y = 0; y < frame.rows.length; y++) {
 			const row = frame.rows[y]!;
 			if (row.skip) continue;
-			const isRule = layout.rowRule[y] === true;
+			const isRuleRow = layout.rowRule[y] === true;
 			const bounds = boxBounds(row);
 
 			const cells = row.cells;
 			for (let i = 0; i < cells.length; i++) {
 				const cell = cells[i]!;
+				// Rows are classified from the transcript; the sidebar beside it is not part of the rule.
+				const isRule = isRuleRow && cell.region !== "sidebar";
 				const inBox = layout.rowBox[y] === true && isBoxCell(row, cell.col, bounds);
 				const backgroundBlend = inBox ? boxBlend : 0.17 * blend;
 				const paintBg = allowBg && !cell.region && !layout.rowEditor[y] && !layout.rowFooter[y] && backgroundBlend > 0 && (scope !== "panels" || inBox);

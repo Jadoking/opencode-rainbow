@@ -18,7 +18,7 @@ import { clamp255, type RGB } from "./color.js";
 /** Parsed source metadata is shared between frames; effects only change output fields. */
 export type FrameCell = AnsiCell & {
   /** Native host regions that only allow foreground tinting. */
-  region?: "input" | "footer";
+  region?: "input" | "footer" | "sidebar";
 	/** Starting column of this cell (wide glyphs occupy `width` columns). */
 	col: number;
 	/** True when the glyph is whitespace, including inside a filled box. */

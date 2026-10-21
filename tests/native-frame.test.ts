@@ -88,6 +88,87 @@ test("region detection works with minified OpenCode classes and model footer sib
   assert.ok(regions.some((r) => r.kind === "footer" && r.y === 4 && r.height === 2));
 });
 
+// A table in the transcript beside the session sidebar, which OpenCode paints
+// with its own raised background.
+function sidebarFixture(sidebarText: boolean) {
+  const p = fixture();
+  const table = ["┌──────────────────┐", "│ alpha    │ beta  │", "├──────────────────┤",
+    "│ gamma    │ delta │", "└──────────────────┘", " plain prose here   "];
+  const side = ["Title", "Context", "12% used", "MCP", "• cua", "Connected"];
+  table.forEach((line, y) => [...line].forEach((ch, x) => { p.char[y * 30 + x] = ch.codePointAt(0)!; }));
+  for (let y = 0; y < 6; y++) for (let x = 20; x < 30; x++) {
+    p.bg.set([21, 21, 28, 255], (y * 30 + x) * 4);
+    const ch = side[y]![x - 21];
+    if (sidebarText && x > 20 && ch) p.char[y * 30 + x] = ch.codePointAt(0)!;
+  }
+  return p;
+}
+const sidebarRegion = [{ x: 20, y: 0, width: 10, height: 6, kind: "sidebar" as const }];
+
+test("the session sidebar keeps its background and glyphs beside tables", () => {
+  const p = sidebarFixture(true);
+  const original = structuredClone(p);
+  const s = settings({ scope: "panels", colorFooter: true, frameBudgetMs: 0, fx: Object.fromEntries(allFx().map((f) => [f.id, 1])) });
+  render(p, s, sidebarRegion);
+  for (let y = 0; y < 6; y++) {
+    const start = y * 30 + 20, end = start + 10;
+    assert.deepEqual(p.char.slice(start, end), original.char.slice(start, end), `row ${y} sidebar glyphs`);
+    assert.deepEqual(p.bg.slice(start * 4, end * 4), original.bg.slice(start * 4, end * 4), `row ${y} sidebar background`);
+  }
+  assert.notDeepEqual(p.fg.slice(21 * 4, 26 * 4), original.fg.slice(21 * 4, 26 * 4), "sidebar text still takes the gradient");
+});
+
+test("sidebar contents never change how the transcript beside it is classified", () => {
+  const s = settings({ scope: "panels", colorFooter: true, frameBudgetMs: 0 });
+  const [withText, blank] = [sidebarFixture(true), sidebarFixture(false)];
+  for (const p of [withText, blank]) {
+    const engine = new RainbowEngine(s);
+    Object.defineProperty(engine, "now", { get: () => 1 });
+    processNativeFrame({ buffers: p, width: 30, height: 6 }, engine, s, { inputMode: "base", regions: sidebarRegion });
+  }
+  for (let y = 0; y < 6; y++) {
+    const start = y * 30, end = start + 20;
+    assert.deepEqual(withText.fg.slice(start * 4, end * 4), blank.fg.slice(start * 4, end * 4), `row ${y} transcript text`);
+    assert.deepEqual(withText.bg.slice(start * 4, end * 4), blank.bg.slice(start * 4, end * 4), `row ${y} transcript background`);
+  }
+});
+
+test("tables in the transcript never change how sidebar text is coloured", () => {
+  const s = settings({ scope: "panels", colorFooter: true, frameBudgetMs: 0 });
+  const withTable = sidebarFixture(true);
+  const without = sidebarFixture(true);
+  for (let y = 0; y < 6; y++) for (let x = 0; x < 20; x++) without.char[y * 30 + x] = 32;
+  for (const p of [withTable, without]) {
+    const engine = new RainbowEngine(s);
+    Object.defineProperty(engine, "now", { get: () => 1 });
+    processNativeFrame({ buffers: p, width: 30, height: 6 }, engine, s, { inputMode: "base", regions: sidebarRegion });
+  }
+  for (let y = 0; y < 6; y++) {
+    const start = y * 30 + 20, end = start + 10;
+    assert.deepEqual(withTable.fg.slice(start * 4, end * 4), without.fg.slice(start * 4, end * 4), `row ${y} sidebar text`);
+    assert.deepEqual(withTable.attributes.slice(start, end), without.attributes.slice(start, end), `row ${y} sidebar styles`);
+  }
+});
+
+test("region detection finds the sidebar column from its slot marker", () => {
+  const node = (id: string, x: number, y: number, width: number, height: number) => ({ id, screenX: x, screenY: y,
+    width, height, zIndex: 0, visible: true, parent: null, getChildren: () => [] } as unknown as Renderable);
+  const attach = (parent: Renderable, ...children: Renderable[]) => {
+    parent.getChildren = () => children;
+    for (const child of children) child.parent = parent;
+  };
+  const root = node("__root__", 0, 0, 120, 40);
+  const row = node("box-5", 0, 0, 120, 38);
+  const transcript = node("box-6", 0, 0, 78, 38);
+  const sidebar = node("box-7", 78, 0, 42, 38);
+  const footer = node("box-8", 80, 30, 38, 7);
+  const slot = node("box-9", 80, 30, 38, 1);
+  const marker = node("box-10", 80, 30, 0, 0);
+  attach(root, row); attach(row, transcript, sidebar); attach(sidebar, footer); attach(footer, slot); attach(slot, marker);
+  const regions = collectRegions(root, [], [marker]);
+  assert.deepEqual(regions.filter((r) => r.kind === "sidebar"), [{ x: 78, y: 0, width: 42, height: 38, kind: "sidebar" }]);
+});
+
 // Reduced from OpenCode 2.0.27's live autocomplete tree. The popup is a raised
 // sibling of the prompt body, with a scrollbox, and has no stable component ID.
 function autocompleteTree() {
