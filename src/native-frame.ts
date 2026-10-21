@@ -139,13 +139,13 @@ export function collectRegions(root: Renderable, footers: Iterable<Renderable>, 
     // OpenCode's autocomplete popup has generated IDs: recognise its raised
     // scrollbox container instead. Protect the border and selection as well as
     // the text, and stop here so clipped rows cannot affect the prompt below.
-    if (node.zIndex > 0 && node.getChildren().some((child) => child.id.startsWith("scrollbox-"))) {
+    if (node.zIndex > 0 && node.getChildren().some((child) => /^scrollbox-/.test(child.id))) {
       rect(node, "protected");
       return;
     }
     // Production builds minify class names, so use stable IDs and capabilities.
     if ("editBuffer" in node && "editorView" in node) {
-      if (node.id.startsWith("textarea-") && node.parent) {
+      if (/^textarea-/.test(node.id) && node.parent) {
         rect(node.parent, "input");
         for (const sibling of node.parent.getChildren()) {
           if (sibling !== node && sibling.screenY >= node.screenY + node.height) rect(sibling, "footer");
@@ -162,7 +162,7 @@ export function collectRegions(root: Renderable, footers: Iterable<Renderable>, 
     if (node.id === "prompt.footer.location" && node.parent?.parent) rect(node.parent.parent, "footer");
     // Images are protected cell by cell in readFrame: an image element's box
     // can be left over other content once it scrolls out of view.
-    if (node.id.startsWith("terminal-")) { rect(node, "protected"); return; }
+    if (/^terminal-/.test(node.id)) { rect(node, "protected"); return; }
     for (const child of node.getChildren()) visit(child);
   };
   visit(root);

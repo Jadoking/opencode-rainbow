@@ -103,6 +103,15 @@ test("an image element's layout box is not a protected region", () => {
   assert.deepEqual(collectRegions(image, []), []);
 });
 
+test("region detection tolerates host elements without an ID", () => {
+  // OpenCode's live tree has renderables whose `id` is undefined.
+  const node = (id: string | undefined, children: Renderable[] = []) => ({ id, screenX: 0, screenY: 0, width: 10,
+    height: 2, zIndex: 0, visible: true, parent: null, getChildren: () => children } as unknown as Renderable);
+  const terminal = node("terminal-1");
+  const regions = collectRegions(node("__root__", [node(undefined, [terminal])]), []);
+  assert.deepEqual(regions.map((r) => r.kind), ["protected"]);
+});
+
 test("region detection works with minified OpenCode classes and model footer siblings", () => {
   const node = (id: string, y: number, h = 1) => ({ id, screenX: 2, screenY: y, width: 20, height: h,
     visible: true, parent: null, constructor: { name: "ph" }, getChildren: () => [] } as unknown as Renderable);
