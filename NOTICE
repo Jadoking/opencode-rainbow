@@ -1,0 +1,11 @@
+Ported from the installed Pi Rainbow package:
+https://github.com/Jadoking/pi-plugin-rainbow
+Source revision: 6df01f86f66e4587e300a3508f1d1e0636b2b224
+The source package declares the MIT license.
+
+The colour math, palette catalogue, gradient fields, effects, ANSI utilities,
+layout analysis, settings defaults and look bundles originate in Pi Rainbow.
+This port adds the OpenCode V2 lifecycle, native framebuffer adapter, menus,
+commands, storage, animation scheduling and host-specific regression tests.
+
+Pi Rainbow in turn credits oc-plugin-rainbow as its inspiration.

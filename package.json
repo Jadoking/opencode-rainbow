@@ -1,0 +1,39 @@
+{
+  "name": "opencode-rainbow",
+  "version": "0.1.0",
+  "description": "Pi Rainbow's palettes and effects for OpenCode V2",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tui": "./src/tui.tsx"
+  },
+  "files": [
+    "index.ts",
+    "tui.ts",
+    "tsconfig.json",
+    "src",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "^2.0.27",
+    "@opentui/core": "^0.5.17",
+    "@opentui/solid": "^0.5.17",
+    "solid-js": "^1.9.0"
+  },
+  "dependencies": {
+    "string-width": "^7.2.0"
+  },
+  "devDependencies": {
+    "@opencode/theme": "^2.0.27",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.2"
+  }
+}
