@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { GRADIENT_MODES, type GradientMode, MOTION_MODES, type MotionMode } from "./field.js";
 import { type RainbowScope, SCOPES } from "./layout.js";
 import { fxIds, getFx } from "./fx.js";
-import { DEFAULT_PRESET, hasPreset } from "./presets.js";
+import { hasPreset } from "./presets.js";
+import { DEFAULT_THEME, findTheme, themeLook } from "./themes.js";
 import "./fx-particles.js";
 import "./fx-post.js";
 
@@ -14,6 +15,8 @@ export type RegularModePolicy = "off" | "viewport" | "full";
 
 export type RainbowSettings = {
 	enabled: boolean;
+	/** The theme last picked. Its look may since have been customised. */
+	theme: string;
 
 	/* palette */
 	preset: string;
@@ -96,40 +99,26 @@ export type RainbowSettings = {
 	splashOnStart: boolean;
 };
 
-export const DEFAULT_FX: Record<string, number> = {
-	starfield: 0.45,
-	shine: 0.4,
-	vignette: 0.35,
-	heat: 0.5,
-	bloom: 0.3,
-};
+const DEFAULT_LOOK = themeLook(findTheme(DEFAULT_THEME)!);
+
+export const DEFAULT_FX: Record<string, number> = DEFAULT_LOOK.fx;
 
 export const DEFAULT_SETTINGS: RainbowSettings = {
 	enabled: true,
+	theme: DEFAULT_THEME,
 
-	preset: DEFAULT_PRESET,
+	// The default theme's look, unmodified.
+	...DEFAULT_LOOK,
+	fx: { ...DEFAULT_FX },
 	presetFade: 0.8,
 	presetCycle: 0,
 
 	scope: "panels",
 	minContrast: 3.2,
-	mode: "diagonal",
-	motion: "scroll",
-	speed: 0.12,
-	turns: 2,
-	angle: 0,
-
-	blend: 0.85,
-	boxBlend: 0.15,
-	vibrance: 1,
-	brightness: 0,
 	colorText: true,
 	colorBackground: true,
 	preserveDim: true,
 	fullBleed: true,
-
-	fx: { ...DEFAULT_FX },
-	chaos: 1,
 
 	fps: 24,
 	alwaysAnimate: false,
@@ -190,11 +179,15 @@ function normalizeFx(value: unknown): Record<string, number> {
 
 export function normalizeSettings(value: Partial<RainbowSettings> | undefined): RainbowSettings {
 	const d = DEFAULT_SETTINGS;
-	const preset = typeof value?.preset === "string" && value.preset.trim() ? value.preset.trim() : d.preset;
+	const raw = typeof value?.preset === "string" && value.preset.trim() ? value.preset.trim() : d.preset;
+	// Old palette names map to the theme that replaced them; unknown ones fall back.
+	const preset = raw.includes("#") ? raw : hasPreset(raw) ? findTheme(raw)!.id : d.preset;
+	const theme = findTheme(typeof value?.theme === "string" ? value.theme : "")?.id ?? findTheme(preset)?.id ?? d.theme;
 	return {
 		enabled: bool(value?.enabled, d.enabled),
+		theme,
 
-		preset: preset.includes("#") || hasPreset(preset) ? preset : d.preset,
+		preset,
 		presetFade: clamp(num(value?.presetFade, d.presetFade), 0, 5),
 		presetCycle: clamp(num(value?.presetCycle, d.presetCycle), 0, 3600),
 
@@ -254,250 +247,4 @@ export async function loadPiSettings(): Promise<RainbowSettings> {
 	} catch {
 		return { ...DEFAULT_SETTINGS, fx: { ...DEFAULT_FX } };
 	}
-}
-
-/* ------------------------------------------------------------------ *
- * Named bundles — one command flips a whole look
- * ------------------------------------------------------------------ */
-
-export type Bundle = {
-	id: string;
-	name: string;
-	blurb: string;
-	settings: Partial<RainbowSettings>;
-};
-
-export const BUNDLES: Bundle[] = [
-	{
-		id: "zen",
-		name: "Zen",
-		blurb: "barely there — a slow tint and nothing else",
-		settings: {
-			preset: "nord",
-			mode: "diagonal",
-			motion: "breathe",
-			speed: 0.04,
-			turns: 1,
-			blend: 0.72,
-			vibrance: 1.3,
-			chaos: 0.6,
-			colorBackground: true,
-			fx: { vignette: 0.25 },
-			fps: 12,
-		},
-	},
-	{
-		id: "default",
-		name: "Default",
-		blurb: "the shipped look",
-		settings: {
-			...DEFAULT_SETTINGS,
-			fx: { ...DEFAULT_FX },
-		},
-	},
-	{
-		id: "crt",
-		name: "CRT",
-		blurb: "phosphor glow, scanlines, a bit of grain",
-		settings: {
-			preset: "phosphor",
-			mode: "vertical",
-			motion: "scroll",
-			speed: 0.05,
-			turns: 1,
-			blend: 0.95,
-			colorBackground: true,
-			fx: { scanlines: 0.55, vignette: 0.6, noisegrain: 0.35, bloom: 0.45, interlace: 0.3, neon: 0.4 },
-			chaos: 1,
-		},
-	},
-	{
-		id: "synthwave",
-		name: "Synthwave",
-		blurb: "grid floor, neon text, sunset palette",
-		settings: {
-			preset: "synthwave",
-			mode: "vertical",
-			motion: "scroll",
-			speed: 0.08,
-			turns: 1.5,
-			blend: 0.9,
-			colorBackground: true,
-			fx: { gridfloor: 0.8, neon: 0.6, bloom: 0.5, vignette: 0.5, starfield: 0.4, shine: 0.3 },
-			chaos: 1,
-		},
-	},
-	{
-		id: "matrix",
-		name: "Matrix",
-		blurb: "digital rain, green on green",
-		settings: {
-			preset: "matrix",
-			mode: "vertical",
-			motion: "scroll",
-			speed: 0.06,
-			turns: 1,
-			blend: 0.95,
-			colorBackground: true,
-			fx: { matrix: 0.8, scanlines: 0.3, bloom: 0.4, vignette: 0.45, heat: 0.5 },
-			chaos: 1,
-		},
-	},
-	{
-		id: "inferno",
-		name: "Inferno",
-		blurb: "the terminal is on fire",
-		settings: {
-			preset: "lava",
-			mode: "noise",
-			motion: "drift",
-			speed: 0.1,
-			turns: 2,
-			blend: 0.9,
-			colorBackground: true,
-			fx: { fire: 0.8, heat: 0.7, bloom: 0.5, vignette: 0.55, noisegrain: 0.25 },
-			chaos: 1,
-		},
-	},
-	{
-		id: "deepspace",
-		name: "Deep Space",
-		blurb: "stars, comets, slow nebula drift",
-		settings: {
-			preset: "galaxy",
-			mode: "noise",
-			motion: "drift",
-			speed: 0.03,
-			turns: 1.2,
-			blend: 0.85,
-			colorBackground: true,
-			fx: { starfield: 0.8, comet: 0.7, plasmafield: 0.3, bloom: 0.4, vignette: 0.6, aurora: 0.3 },
-			chaos: 1,
-		},
-	},
-	{
-		id: "storm",
-		name: "Storm",
-		blurb: "rain, lightning, and a cold palette",
-		settings: {
-			preset: "storm",
-			mode: "vertical",
-			motion: "scroll",
-			speed: 0.09,
-			turns: 1.5,
-			blend: 0.85,
-			colorBackground: true,
-			fx: { rain: 0.7, lightning: 0.5, vignette: 0.5, noisegrain: 0.2, bloom: 0.3 },
-			chaos: 1,
-		},
-	},
-	{
-		id: "winter",
-		name: "Winter",
-		blurb: "snow drifting past a cold blue gradient",
-		settings: {
-			preset: "ice",
-			mode: "diagonal",
-			motion: "drift",
-			speed: 0.05,
-			turns: 1.5,
-			blend: 0.8,
-			colorBackground: true,
-			fx: { snow: 0.7, vignette: 0.4, bloom: 0.3, shine: 0.25 },
-			chaos: 1,
-		},
-	},
-	{
-		id: "hanami",
-		name: "Hanami",
-		blurb: "petals, soft pinks, gentle light",
-		settings: {
-			preset: "sakura",
-			mode: "diagonal",
-			motion: "drift",
-			speed: 0.04,
-			turns: 1.2,
-			blend: 0.75,
-			vibrance: 1.25,
-			brightness: -0.22,
-			colorBackground: true,
-			fx: { sakura: 0.85, bloom: 0.3, vignette: 0.5, shine: 0.15 },
-			chaos: 1,
-		},
-	},
-	{
-		id: "aquarium",
-		name: "Aquarium",
-		blurb: "bubbles rising through deep water",
-		settings: {
-			preset: "deep-sea",
-			mode: "radial",
-			motion: "breathe",
-			speed: 0.05,
-			turns: 2,
-			blend: 0.85,
-			colorBackground: true,
-			fx: { bubbles: 0.7, aurora: 0.4, vignette: 0.55, bloom: 0.3, wobble: 0.3 },
-			chaos: 1,
-		},
-	},
-	{
-		id: "party",
-		name: "Party",
-		blurb: "everything, all at once",
-		settings: {
-			preset: "neon",
-			mode: "plasma",
-			motion: "drift",
-			speed: 0.3,
-			turns: 3,
-			blend: 1,
-			colorBackground: true,
-			fx: {
-				confetti: 0.6,
-				starfield: 0.5,
-				fireflies: 0.5,
-				shine: 0.6,
-				bloom: 0.6,
-				neon: 0.6,
-				ripples: 0.8,
-				waveform: 0.7,
-				wobble: 0.4,
-				breathing: 0.4,
-			},
-			chaos: 1.3,
-		},
-	},
-	{
-		id: "chaos",
-		name: "Chaos",
-		blurb: "no survivors",
-		settings: {
-			preset: "acid",
-			mode: "voronoi",
-			motion: "jitter",
-			speed: 0.6,
-			turns: 4,
-			blend: 1,
-			colorBackground: true,
-			fx: {
-				glitch: 0.8,
-				aberration: 0.7,
-				strobe: 0.35,
-				confetti: 0.7,
-				lightning: 0.6,
-				wobble: 0.7,
-				bloom: 0.7,
-				noisegrain: 0.5,
-				interlace: 0.5,
-				matrix: 0.5,
-			},
-			chaos: 1.6,
-		},
-	},
-];
-
-export function getBundle(id: string): Bundle | undefined {
-	const key = id.trim().toLowerCase();
-	return BUNDLES.find((b) => b.id === key || b.name.toLowerCase() === key);
 }

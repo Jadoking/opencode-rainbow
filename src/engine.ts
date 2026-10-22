@@ -139,6 +139,12 @@ export class RainbowEngine {
 		this.fadeStart = this.now;
 	}
 
+	/** The current palette's colours changed under the same name (Match OpenCode). */
+	refreshPalette(): void {
+		this.rampFrom = this.rampTo = rampFor(this.settings.preset);
+		this.fadeStart = -1;
+	}
+
 	/** A static renderer has no later frame to finish a palette crossfade. */
 	settlePalette(): void {
 		this.rampFrom = this.rampTo;

@@ -1,6 +1,6 @@
 # OpenCode Rainbow
 
-Port of the installed Pi Rainbow extension to OpenCode V2. Includes its 81 palettes, 16 gradient fields, 8 motion modes, 34 effects, 13 look bundles, and all current settings.
+Animated colour themes for OpenCode V2, ported from the Pi Rainbow extension. 22 curated themes, each a whole look (palette, pattern, motion and effects), with a live-preview settings menu for customising any part.
 
 ## Install
 
@@ -24,6 +24,21 @@ OpenCode watches local plugins and configuration. Restart the TUI if it was open
 
 On first load, Rainbow imports `~/.pi/agent/state/pi-plugin-rainbow.json`, respecting `PI_CODING_AGENT_DIR`. After that, OpenCode owns the saved settings and synchronizes them across its terminal instances. Pi's file is never modified. Set plugin option `importPiSettings: false` to start a fresh installation with the original defaults.
 
+## Themes
+
+Themes come in four families. Picking one applies its whole look; Customize then changes any part, and the menu marks the theme as customized.
+
+| Family | Themes |
+| --- | --- |
+| Editor themes | Match OpenCode, Nord, Catppuccin, Tokyo Night, Dracula, Gruvbox, Rosé Pine, Kanagawa, Everforest |
+| Spectrum | Classic Rainbow, Pastel, Holographic |
+| Nature & mood | Sunset, Ocean, Aurora, Forest, Sakura, Winter, Ember |
+| Retro | Synthwave, Matrix, Amber CRT |
+
+Editor themes use the colours that give each theme its identity, with calm motion and no effects. **Match OpenCode** builds its palette from the active OpenCode theme's syntax and accent colours and follows theme changes. Every palette stop is light enough to read as text on a dark background.
+
+Palette names from earlier versions map to the closest theme, so saved settings keep working.
+
 ## Commands
 
 All commands also appear under Rainbow in the command palette.
@@ -31,25 +46,27 @@ All commands also appear under Rainbow in the command palette.
 | Command | Action |
 | --- | --- |
 | `/rainbow [on\|off]` | Toggle or explicitly enable/disable |
-| `/rainbow-settings` | Live settings, effects and animated preview |
-| `/rainbow-preset [list\|next\|prev\|random\|name]` | Search palettes or switch directly |
-| `/rainbow-bundle [list\|name]` | Search and apply whole-look bundles |
-| `/rainbow-fx <id> [0..1]` | Toggle or set an effect's intensity |
-| `/rainbow-fx list` | Search effects, including current intensities |
-| `/rainbow-fx none` | Disable all effects |
-| `/rainbow-mode [list\|field\|motion]` | Choose a gradient or motion mode |
-| `/rainbow-scope [screen\|panels\|chrome\|text]` | Set where effects apply |
-| `/rainbow-speed [number]` | Read or change palette cycles per second |
-| `/rainbow-reset` | Restore the original defaults |
+| `/rainbow-settings` | Themes, Customize, Effects and Advanced, with a live preview |
+| `/rainbow-theme [name\|next\|prev\|random]` | Browse themes, or apply one directly |
+| `/rainbow-fx [id [0..1]\|none]` | Browse effects, toggle one, set its intensity, or turn all off |
+| `/rainbow-reset` | Restore the defaults (Classic Rainbow) |
 | `/rainbow-splash` | Show the animated banner for 2.8 seconds |
-| `/rainbow-status` | Renderer, frame-rate, cost and quality diagnostics |
+| `/rainbow-status` | Renderer, frame-rate, cost, quality and focus diagnostics |
 | `/rainbow-set <setting> <value>` | Set any scalar setting by its stored name |
 
-`Ctrl+Shift+R` advances the palette; `Ctrl+Shift+E` toggles Rainbow. These follow the installed Pi implementation. Their OpenCode command IDs are `rainbow.next` and `rainbow`; keybindings can be changed in `cli.json`.
+`Ctrl+Shift+R` moves to the next theme; `Ctrl+Shift+E` toggles Rainbow. Their OpenCode command IDs are `rainbow.next` and `rainbow`; keybindings can be changed in `cli.json`.
 
-Custom palettes work with `/rainbow-preset #ff8800,#8822ff,#44ccff`.
+Custom palettes work with `/rainbow-set preset #ff8800,#8822ff,#44ccff`.
 
-In settings, use **Up/Down** to select, **Left/Right** to adjust, **Space** to toggle, **Page Up/Down** to jump, and **Escape** or **Enter** to close. Mouse wheel and row clicks also work. `r` restores the values from when the dialog opened. Changes save immediately. The preview uses the same engine as the session; the outer effect pauses while the settings or splash preview is open.
+## Settings menu
+
+The menu has four pages: **Themes**, **Customize**, **Effects** and **Advanced**. The preview at the top draws a small OpenCode screen (prose, a tool block, a table and the sidebar) in your OpenCode theme's colours, through the same renderer as the session. On the Themes page it shows the highlighted theme before you apply it.
+
+- **Themes**: Up/Down browse, Enter or Space applies, each theme shows its palette as a swatch and its pattern, motion and effects below the list.
+- **Customize**, **Effects**, **Advanced**: Up/Down select, Left/Right adjust, Space toggles. Numbers show as sliders.
+- Tab and Shift+Tab, or 1 to 4, switch pages. `r` restores the values from when the menu opened. Escape closes. Changes save immediately. Mouse wheel and clicks also work.
+
+The session's own animation pauses while the menu is open.
 
 ## Rendering and motion
 
@@ -58,6 +75,7 @@ In settings, use **Up/Down** to select, **Left/Right** to adjust, **Space** to t
 - Input and footer text have separate switches. Their characters and backgrounds stay intact. Native Unicode graphemes, hyperlinks, inverse selections, image regions and embedded terminals retain their native representation.
 - Autocomplete menus keep their native text, backgrounds and selection highlights. Opening slash suggestions keeps the surrounding palette steady.
 - Palette crossfades, auto-cycling, reactive effects, contrast correction, dim-text restraint, box strength, full bleed and adaptive frame budgets use the original engine.
+- An unfocused terminal pane keeps its colours but stops animating; focus resumes it. Terminals that don't report focus keep animating.
 - Idle pause stops the animation timer after the configured interval. Typing, pasting, mouse activity or work events wake it. Active session work stays animated. Reduced motion caps animation at 12 fps and reduces speed and intensity.
 - `animateInTmux` controls multiplexer animation. `OPENCODE_RAINBOW_DISABLE_ANIMATION=1` forces static rendering; `OPENCODE_RAINBOW_FORCE_ANIMATION=1` overrides tmux suppression. Disable wins. The equivalent `PI_RAINBOW_*` variables remain accepted.
 

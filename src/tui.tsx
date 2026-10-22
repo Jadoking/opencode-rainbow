@@ -2,11 +2,15 @@ import { Plugin } from "@opencode/plugin/tui";
 import type { Renderable, OptimizedBuffer } from "@opentui/core";
 import { createEffect, createSignal, on, onCleanup, Show, untrack } from "solid-js";
 import { commands } from "./commands.js";
+import type { Page } from "./controls.js";
 import { SettingsDialog, SplashDialog } from "./dialogs.js";
 import { RainbowEngine } from "./engine.js";
 import { collectRegions, FrameCache, processNativeFrame } from "./native-frame.js";
+import { setLivePalette } from "./presets.js";
+import { opencodePalette } from "./preview.js";
 import { AnimationPump } from "./pump.js";
 import { DEFAULT_SETTINGS, loadPiSettings, normalizeSettings, type RainbowSettings } from "./settings.js";
+import { findTheme, isCustomized, OPENCODE_THEME } from "./themes.js";
 
 export default Plugin.define({
   id: "opencode.rainbow",
@@ -20,7 +24,7 @@ export default Plugin.define({
       onCleanup(() => { if (marker) footers.delete(marker); });
       return <box ref={(node) => { marker = node; footers.add(node); }}>
         <Show when={settings().showStatus}>
-          <text fg={ctx.theme.text.muted}> {settings().enabled ? "◆" : "◇"} rainbow {settings().preset} · {settings().scope} · {settings().mode}/{settings().motion} · {Object.keys(settings().fx).length}fx</text>
+          <text fg={ctx.theme.text.muted}> {settings().enabled ? "◆" : "◇"} rainbow {findTheme(settings().theme)?.name ?? "custom"}{isCustomized(settings()) ? "*" : ""} · {Object.keys(settings().fx).length}fx</text>
         </Show>
       </box>;
     }
@@ -34,6 +38,8 @@ export default Plugin.define({
     const slots = [ctx.ui.slot({ append: "prompt.footer.status", render: Footer }), ctx.ui.slot({ append: "home.footer.status", render: Footer }),
       ctx.ui.slot({ append: "sidebar.footer", render: SidebarMarker })];
     const app = ctx.ui.slot({ append: "app", render: () => untrack(() => {
+      // Match OpenCode follows the active theme; the palette refreshes when it changes.
+      setLivePalette(opencodePalette(ctx.theme));
       const engine = new RainbowEngine(settings());
       let suspended = false;
       // Focus events only report changes, so start from OpenTUI's last known
@@ -82,21 +88,21 @@ export default Plugin.define({
       // own redraws there replay the frozen frame from the cache.
       const blur = () => { blurred = true; pump.suspended = true; pump.refresh(); };
       const focus = () => { blurred = false; pump.suspended = suspended || failed; activity(); ctx.renderer.requestRender(); };
-      const showDialog = (splash: boolean) => {
+      const showDialog = (splash: boolean, page?: Page) => {
         ctx.ui.dialog.clear();
         suspend(true);
         dialogOwned = true;
         ctx.ui.dialog.show(() => splash ? <SplashDialog ctx={ctx} settings={settings()} /> :
-          <SettingsDialog ctx={ctx} settings={settings} apply={apply} working={working} />,
+          <SettingsDialog ctx={ctx} settings={settings} apply={apply} working={working} page={page} />,
           () => { dialogOwned = false; suspend(false); });
-        ctx.ui.dialog.set({ size: "large", centered: true });
+        ctx.ui.dialog.set({ size: splash ? "large" : "xlarge", centered: true });
       };
       const entries = commands(ctx, settings, apply, {
-        settings: () => showDialog(false), splash: () => showDialog(true),
+        settings: (page) => showDialog(false, page), splash: () => showDialog(true),
         status: () => {
           const stats = engine.getStats();
           return `enabled=${settings().enabled}, attached=${!failed}, fullscreen=${ctx.renderer.screenMode === "alternate-screen"}, input=${ctx.keymap.mode.current()}, focused=${!blurred}\n` +
-            `${settings().preset} · ${settings().scope} · ${settings().mode}/${settings().motion}\n` +
+            `${findTheme(settings().theme)?.name ?? "custom"}${isCustomized(settings()) ? " (customized)" : ""} · ${settings().scope} · ${settings().mode}/${settings().motion}\n` +
             `${engine.activeFxIds().length} effects · ${pump.fps} fps · ${stats.frames} frames\n` +
             `${stats.lastMs.toFixed(1)}ms last / ${stats.avgMs.toFixed(1)}ms average · quality ${stats.quality.toFixed(2)} · ${stats.dropped} over-budget frames`;
         },
@@ -104,6 +110,11 @@ export default Plugin.define({
       ctx.keymap.layer(() => ({ mode: "global", commands: entries, bindings: ["rainbow", "rainbow.next"] }));
       const process = (buffer: OptimizedBuffer) => {
         const s = settings();
+        if (setLivePalette(opencodePalette(ctx.theme)) && s.preset === OPENCODE_THEME) {
+          engine.refreshPalette();
+          cache.invalidate();
+          tickDue = true;
+        }
         if (failed || suspended || !s.enabled) return;
         if (ctx.renderer.screenMode !== "alternate-screen" && s.regularMode === "off") return;
         try {
