@@ -14,21 +14,88 @@ const rgb = (plane: Uint16Array, at: number): RGB => ({ r: plane[at] & 255, g: p
 const equal = (a: RGB | null, b: RGB | null) => a === b || !!a && !!b && a.r === b.r && a.g === b.g && a.b === b.b;
 const code = (c: RGB) => `48;2;${c.r};${c.g};${c.b}`;
 
+type PlaneCopy = { char: Uint32Array; fg: Uint16Array; bg: Uint16Array; attributes: Uint32Array };
+const copyPlanes = (p: Planes): PlaneCopy =>
+  ({ char: p.char.slice(), fg: p.fg.slice(), bg: p.bg.slice(), attributes: p.attributes.slice() });
+
+/**
+ * The last processed input and output, row by row. A redraw between ticks
+ * draws the same scene, so a row whose input is unchanged gets its previous
+ * output back and only rows the host actually changed are reprocessed.
+ */
+export class FrameCache {
+  private key = "";
+  private input?: PlaneCopy;
+  private output?: PlaneCopy;
+
+  invalidate() { this.key = ""; }
+
+  /** Rows whose input differs from the cached input, or undefined when the cache can't be used. */
+  changedRows(planes: Planes, width: number, key: string): boolean[] | undefined {
+    const input = this.input;
+    if (key !== this.key || !input || !this.output || input.char.length !== planes.char.length) return undefined;
+    const rows = new Array<boolean>(planes.char.length / width);
+    for (let y = 0; y < rows.length; y++) {
+      const a = y * width, b = a + width;
+      let changed = false;
+      for (let i = a; i < b && !changed; i++) changed = planes.char[i] !== input.char[i] || planes.attributes[i] !== input.attributes[i];
+      for (let i = a * 4; i < b * 4 && !changed; i++) changed = planes.fg[i] !== input.fg[i] || planes.bg[i] !== input.bg[i];
+      rows[y] = changed;
+    }
+    return rows;
+  }
+
+  /** Puts the cached output back on one row. */
+  restoreRow(planes: Planes, width: number, y: number) {
+    const output = this.output!, a = y * width, b = a + width;
+    planes.char.set(output.char.subarray(a, b), a);
+    planes.attributes.set(output.attributes.subarray(a, b), a);
+    planes.fg.set(output.fg.subarray(a * 4, b * 4), a * 4);
+    planes.bg.set(output.bg.subarray(a * 4, b * 4), a * 4);
+  }
+
+  store(input: PlaneCopy, planes: Planes, key: string) {
+    this.key = key;
+    this.input = input;
+    this.output = copyPlanes(planes);
+  }
+}
+
+/** Processes the frame in place and returns how many rows went through the pipeline. */
 export function processNativeFrame(buffer: Pick<OptimizedBuffer, "buffers" | "width" | "height">,
   engine: RainbowEngine, settings: RainbowSettings,
-  options: { inputMode: string; regions: Region[]; cursor?: ProcessOptions["cursor"]; advance?: boolean }) {
-  // Autocomplete has no dimmed backdrop. Treating it like a modal makes the
-  // entire palette jump each time '/' opens the suggestions.
-  const overlayVisible = options.inputMode !== "base" && options.inputMode !== "autocomplete";
-  const frame = readFrame(buffer.buffers, buffer.width, buffer.height,
-    overlayVisible ? frameBackground(buffer.buffers) : engine.bg, settings, options.regions);
-  engine.processFrame(frame, { width: buffer.width, height: buffer.height, fullscreen: true,
-    cursor: options.cursor, overlayVisible, advance: options.advance });
-  writeFrame(buffer.buffers, frame, settings);
+  options: { inputMode: string; regions: Region[]; cursor?: ProcessOptions["cursor"]; advance?: boolean; cache?: FrameCache }): number {
+  const { buffers: planes, width, height } = buffer;
+  const cache = options.cache;
+  // Everything besides the planes that changes the output. Settings changes always tick.
+  const key = cache ? JSON.stringify([options.inputMode, options.regions, options.cursor, engine.bg, engine.fg, width]) : "";
+  const changed = cache && options.advance === false ? cache.changedRows(planes, width, key) : undefined;
+  // Effects such as bloom reach across rows: rewrite every row a change can
+  // affect, and read the rows those depend on so they come out complete.
+  const reach = changed ? engine.rowReach() : 0;
+  const near = (rows: boolean[], r: number) => rows.map((_, y) => rows.slice(Math.max(0, y - r), y + r + 1).some(Boolean));
+  const written = changed && near(changed, reach);
+  const read = changed && near(changed, 2 * reach);
+  const input = cache ? copyPlanes(planes) : undefined;
+  if (read) for (let y = 0; y < height; y++) if (!read[y]) cache!.restoreRow(planes, width, y);
+  const count = read ? read.filter(Boolean).length : height;
+  if (count > 0) {
+    // Autocomplete has no dimmed backdrop. Treating it like a modal makes the
+    // entire palette jump each time '/' opens the suggestions.
+    const overlayVisible = options.inputMode !== "base" && options.inputMode !== "autocomplete";
+    const frame = readFrame(planes, width, height,
+      overlayVisible ? frameBackground(input ?? planes) : engine.bg, settings, options.regions, read);
+    engine.processFrame(frame, { width, height, fullscreen: true,
+      cursor: options.cursor, overlayVisible, advance: options.advance });
+    writeFrame(planes, frame, settings);
+    if (read && written) for (let y = 0; y < height; y++) if (read[y] && !written[y]) cache!.restoreRow(planes, width, y);
+  }
+  if (cache && input) cache.store(input, planes, key);
+  return count;
 }
 
 /** Dialog backdrops change the base fill without changing the theme token. */
-export function frameBackground(planes: Planes): RGB {
+export function frameBackground(planes: Pick<Planes, "bg">): RGB {
   const counts = new Map<number, number>();
   let best = 0, count = 0;
   for (let at = 0; at < planes.bg.length; at += 4) {
@@ -42,9 +109,14 @@ export function frameBackground(planes: Planes): RGB {
 
 /** Keep native grapheme IDs and hyperlink attributes in OpenTUI's ownership. */
 export function readFrame(planes: Planes, width: number, height: number, background: RGB,
-  settings: RainbowSettings, regions: Region[] = []): Frame {
+  settings: RainbowSettings, regions: Region[] = [], only?: boolean[]): Frame {
   const rows: FrameRow[] = [];
   for (let y = 0; y < height; y++) {
+    if (only && !only[y]) {
+      rows.push({ index: y, raw: "", line: { prefix: "", prefixNonSgr: "", cells: [], suffix: "", suffixNonSgr: "", visibleWidth: width },
+        cells: [], byCol: [], used: 0, skip: true, quiet: true, dirty: false });
+      continue;
+    }
     const cells: FrameCell[] = [];
     const byCol: (FrameCell | undefined)[] = new Array(width);
     const bands = regions.filter((r) => y >= r.y && y < r.y + r.height);

@@ -4,7 +4,7 @@ import { createEffect, createSignal, on, onCleanup, Show, untrack } from "solid-
 import { commands } from "./commands.js";
 import { SettingsDialog, SplashDialog } from "./dialogs.js";
 import { RainbowEngine } from "./engine.js";
-import { collectRegions, processNativeFrame } from "./native-frame.js";
+import { collectRegions, FrameCache, processNativeFrame } from "./native-frame.js";
 import { AnimationPump } from "./pump.js";
 import { DEFAULT_SETTINGS, loadPiSettings, normalizeSettings, type RainbowSettings } from "./settings.js";
 
@@ -45,6 +45,8 @@ export default Plugin.define({
       // Only the pump's ticks move the animation. OpenCode redraws far more
       // often while a session works; those replay the last tick unchanged.
       let tickDue = true;
+      // Redraws reuse the last output for every row OpenCode didn't change.
+      const cache = new FrameCache();
       const pump = new AnimationPump(engine, settings, working, () => { tickDue = true; ctx.renderer.requestRender(); });
       const activity = (strength = 0) => {
         pump.activity(strength);
@@ -67,6 +69,7 @@ export default Plugin.define({
         pump.suspended = suspended;
         activity();
         tickDue = true;
+        cache.invalidate();
         ctx.renderer.requestRender();
       }));
       const suspend = (value: boolean) => { suspended = value; pump.suspended = value; pump.refresh(); ctx.renderer.requestRender(); };
@@ -103,7 +106,7 @@ export default Plugin.define({
           const cursor = ctx.renderer.getCursorState();
           processNativeFrame(buffer, engine, s, {
             inputMode: ctx.keymap.mode.current(), regions: collectRegions(ctx.renderer.root, footers, sidebars),
-            cursor: cursor.visible ? { x: cursor.x - 1, y: cursor.y - 1 } : null, advance: tickDue,
+            cursor: cursor.visible ? { x: cursor.x - 1, y: cursor.y - 1 } : null, advance: tickDue, cache,
           });
           tickDue = false;
         } catch (error) {

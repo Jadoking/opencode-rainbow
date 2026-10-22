@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { RainbowEngine } from "../src/engine.js";
 import { allFx } from "../src/fx.js";
-import { collectRegions, frameBackground, processNativeFrame, readFrame, writeFrame, type Planes } from "../src/native-frame.js";
+import { collectRegions, FrameCache, frameBackground, processNativeFrame, readFrame, writeFrame, type Planes } from "../src/native-frame.js";
 import { DEFAULT_SETTINGS, type RainbowSettings } from "../src/settings.js";
 import type { Renderable } from "@opentui/core";
 
@@ -126,8 +126,10 @@ test("region detection works with minified OpenCode classes and model footer sib
 });
 
 test("host redraws between animation ticks repeat the tick's colours exactly", () => {
-  const s = settings({ scope: "screen", motion: "scroll", speed: 1, reactive: true, frameBudgetMs: 0,
-    fx: Object.fromEntries(allFx().map((f) => [f.id, 0.8])) });
+  for (const fx of [...allFx().map((f) => ({ [f.id]: 1 })), Object.fromEntries(allFx().map((f) => [f.id, 0.8]))]) {
+  for (const inputMode of ["base", "dialog"]) {
+  const s = settings({ scope: "screen", motion: "scroll", speed: 1, reactive: true, frameBudgetMs: 0, fx });
+  const label = `${Object.keys(fx).length > 1 ? "all" : Object.keys(fx)[0]} (${inputMode})`;
   const engine = new RainbowEngine(s);
   let now = 5;
   Object.defineProperty(engine, "now", { get: () => now });
@@ -135,7 +137,7 @@ test("host redraws between animation ticks repeat the tick's colours exactly", (
   for (let x = 0; x < 30; x++) { source.char[30 + x] = 65 + x % 26; source.char[90 + x] = 97 + x % 26; }
   const frame = (advance: boolean) => {
     const p = structuredClone(source);
-    processNativeFrame({ buffers: p, width: 30, height: 6 }, engine, s, { inputMode: "base", regions: [], advance });
+    processNativeFrame({ buffers: p, width: 30, height: 6 }, engine, s, { inputMode, regions: [], advance });
     return p;
   };
   frame(true);
@@ -145,10 +147,73 @@ test("host redraws between animation ticks repeat the tick's colours exactly", (
     now = t;
     engine.pulse(1);
     engine.emit({ kind: "ripple", x: 3, y: 2, strength: 1 });
-    assert.deepEqual(frame(false), tick, `redraw at ${t}s`);
+    assert.deepEqual(frame(false), tick, `${label}: redraw at ${t}s`);
   }
   now = 5.6;
-  assert.notDeepEqual(frame(true), tick, "the next tick still animates");
+  assert.notDeepEqual(frame(true), tick, `${label}: the next tick still animates`);
+  }
+  }
+});
+
+test("cached redraws match a full redraw and only reprocess rows whose input changed", () => {
+  const s = settings({ scope: "screen", motion: "scroll", speed: 1, frameBudgetMs: 0,
+    fx: { rain: 1, snow: 1, matrix: 1, sakura: 1, starfield: 0.5, shine: 0.4, vignette: 0.4, glitch: 0.4 } });
+  const source = fixture();
+  for (let x = 0; x < 30; x++) { source.char[30 + x] = 65 + x % 26; source.char[90 + x] = 97 + x % 26; }
+  const run = (cache: FrameCache | undefined) => {
+    const engine = new RainbowEngine(s);
+    let now = 5;
+    Object.defineProperty(engine, "now", { get: () => now });
+    const frame = (p: Planes, advance: boolean) =>
+      processNativeFrame({ buffers: p, width: 30, height: 6 }, engine, s, { inputMode: "base", regions: [], advance, cache });
+    frame(structuredClone(source), true);
+    now = 5.5;
+    frame(structuredClone(source), true);
+    now = 5.55;
+    const same = structuredClone(source);
+    const sameRows = frame(same, false);
+    const edited = structuredClone(source);
+    for (let x = 4; x < 9; x++) edited.char[60 + x] = 0x2588; // streaming text lands on row 2
+    const editedRows = frame(edited, false);
+    return { same, edited, sameRows, editedRows };
+  };
+  const cached = run(new FrameCache());
+  const full = run(undefined);
+  assert.deepEqual(cached.same, full.same, "unchanged redraw");
+  assert.deepEqual(cached.edited, full.edited, "redraw with one changed row");
+  assert.equal(cached.sameRows, 0, "an unchanged redraw processes no rows");
+  assert.equal(cached.editedRows, 1, "only the changed row is processed");
+  assert.equal(full.editedRows, 6, "without a cache every row is processed");
+});
+
+test("cached redraws match full redraws for every effect, including ones that reach across rows", () => {
+  const W = 40, H = 12;
+  const source = () => {
+    const n = W * H;
+    const p = { char: new Uint32Array(n).fill(32), fg: new Uint16Array(n * 4), bg: new Uint16Array(n * 4), attributes: new Uint32Array(n) };
+    for (let i = 0; i < n; i++) { p.fg.set([230, 235, 240, 255], i * 4); p.bg.set([16, 17, 22, 255], i * 4); }
+    for (let y = 0; y < H; y += 2) for (let x = 2; x < 30; x++) p.char[y * W + x] = 65 + (x + y) % 26;
+    return p;
+  };
+  for (const inputMode of ["base", "dialog"]) for (const fx of allFx()) {
+    const s = settings({ scope: "screen", motion: "scroll", speed: 1, frameBudgetMs: 0, fx: { [fx.id]: 1 } });
+    const run = (cache?: FrameCache) => {
+      const engine = new RainbowEngine(s);
+      let now = 5;
+      Object.defineProperty(engine, "now", { get: () => now });
+      const frame = (p: Planes, advance: boolean) =>
+        processNativeFrame({ buffers: p, width: W, height: H }, engine, s, { inputMode, regions: [], advance, cache });
+      frame(source(), true);
+      now = 5.5;
+      frame(source(), true);
+      now = 5.55;
+      const edited = source();
+      for (let x = 4; x < 12; x++) edited.char[4 * W + x] = 0x2588;
+      frame(edited, false);
+      return edited;
+    };
+    assert.deepEqual(run(new FrameCache()), run(), `${fx.id} (${inputMode})`);
+  }
 });
 
 // A table in the transcript beside the session sidebar, which OpenCode paints

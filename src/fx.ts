@@ -71,6 +71,8 @@ export type FxLayer = {
 	defaultIntensity: number;
 	/** Rough cost hint, for the auto-degrade budget. 1 = cheap, 3 = expensive. */
 	cost: 1 | 2 | 3;
+	/** Rows away from a cell that this layer reads or writes. Defaults to 0. */
+	reach?: number;
 	/** Effects in the same slot are mutually exclusive in `/rainbow-fx only`. */
 	apply: (ctx: FxContext, intensity: number) => void;
 };

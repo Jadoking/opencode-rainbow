@@ -77,6 +77,7 @@ const shadow: FxLayer = {
 	blurb: "a dim ghost of every glyph, one cell down and right",
 	defaultIntensity: 0.45,
 	cost: 2,
+	reach: 1,
 	apply(ctx, k) {
 		const { frame, tuning } = ctx;
 		// Collect first; writing while iterating would shadow the shadows.
@@ -495,6 +496,8 @@ const bloom: FxLayer = {
 	blurb: "bright glyphs bleed light into the cells around them",
 	defaultIntensity: 0.45,
 	cost: 3,
+	// spread is 1 + round(level), and level is at most 1.
+	reach: 2,
 	apply(ctx, k) {
 		const { frame, width, tuning } = ctx;
 		const rows = frame.rows.length;

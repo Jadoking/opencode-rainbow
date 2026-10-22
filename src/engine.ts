@@ -199,6 +199,11 @@ export class RainbowEngine {
 		return out;
 	}
 
+	/** How many rows away the active effects read or write. */
+	rowReach(): number {
+		return Math.max(0, ...this.enabledLayers().map((e) => e.layer.reach ?? 0));
+	}
+
 	/** Which effects are active right now, for status lines and the dialog. */
 	activeFxIds(): string[] {
 		return this.enabledLayers().map((e) => e.layer.id);

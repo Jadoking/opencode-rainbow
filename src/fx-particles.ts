@@ -273,13 +273,14 @@ const fire: FxLayer = {
 		const key = `fire:${width}:${h}`;
 		const buf = slot<Uint8Array>(ctx, key, () => new Uint8Array(width * h));
 
-		// Seed the bottom row, then propagate upward with random decay.
+		// Seed the bottom row, then propagate upward with random decay. One step
+		// per moving frame: a redraw at the same time must draw the same flames.
 		const base = (h - 1) * width;
-		for (let x = 0; x < width; x++) {
+		if (ctx.dt > 0) for (let x = 0; x < width; x++) {
 			const flicker = hash2(x, Math.floor(ctx.time * 14), 3);
 			buf[base + x] = flicker > 0.12 ? 255 : 110;
 		}
-		for (let y = h - 1; y > 0; y--) {
+		if (ctx.dt > 0) for (let y = h - 1; y > 0; y--) {
 			for (let x = 0; x < width; x++) {
 				const src = y * width + x;
 				const decay = Math.floor(hash2(x, y * 31 + Math.floor(ctx.time * 30), 5) * 3);
