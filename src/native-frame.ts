@@ -242,7 +242,9 @@ export function writeFrame(planes: Planes, frame: Frame, settings: RainbowSettin
       const i = row.index * frame.width + cell.col;
       // Effects only generate single-codepoint, single-column glyphs. Don't touch
       // pooled graphemes, continuations, or the upper hyperlink attribute bits.
-      if (!textOnly && cell.width === 1 && planes.char[i] <= 0x10ffff && cell.outText !== cell.text && [...cell.outText].length === 1) {
+      // Particles may land in empty sidebar space; sidebar text keeps its glyphs.
+      const sidebarSpace = cell.region === "sidebar" && cell.blank && settings.scope !== "text" && settings.scope !== "chrome";
+      if ((!textOnly || sidebarSpace) && cell.width === 1 && planes.char[i] <= 0x10ffff && cell.outText !== cell.text && [...cell.outText].length === 1) {
         planes.char[i] = cell.outText.codePointAt(0)!;
       }
       for (let k = 0; k < cell.width; k++) {

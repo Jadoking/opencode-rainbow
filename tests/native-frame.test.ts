@@ -276,14 +276,19 @@ test("the session sidebar keeps its glyphs and takes the panel tint on every row
   const original = structuredClone(p);
   const s = settings({ scope: "panels", colorFooter: true, frameBudgetMs: 0, fx: Object.fromEntries(allFx().map((f) => [f.id, 1])) });
   render(p, s, sidebarRegion);
+  let particles = 0;
   for (let y = 0; y < 6; y++) {
     const start = y * 30 + 20, end = start + 10;
-    assert.deepEqual(p.char.slice(start, end), original.char.slice(start, end), `row ${y} sidebar glyphs`);
+    for (let i = start; i < end; i++) {
+      if (original.char[i] === 32) { if (p.char[i] !== 32) particles++; continue; }
+      assert.equal(p.char[i], original.char[i], `row ${y} sidebar text glyph`);
+    }
     assert.deepEqual(p.attributes.slice(start, end), original.attributes.slice(start, end), `row ${y} sidebar styles`);
     // Rows 0, 2 and 4 sit beside table rules: they must be tinted too, or the sidebar stripes.
     assert.notDeepEqual(p.bg.slice(start * 4, end * 4), original.bg.slice(start * 4, end * 4), `row ${y} sidebar tint`);
   }
   assert.notDeepEqual(p.fg.slice(21 * 4, 26 * 4), original.fg.slice(21 * 4, 26 * 4), "sidebar text still takes the gradient");
+  assert.ok(particles > 0, "particles fall through empty sidebar space");
 });
 
 test("sidebar contents never change how the transcript beside it is classified", () => {

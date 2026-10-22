@@ -62,7 +62,8 @@ export function SettingsDialog(props: { ctx: Context; settings: Accessor<Rainbow
   const [boxWidth, setBoxWidth] = createSignal(0);
   const width = () => Math.max(40, boxWidth() > 4 ? boxWidth() - 4 : size().width - 12);
   const previewHeight = () => size().height >= 44 ? 14 : size().height >= 32 ? 10 : size().height >= 24 ? 6 : 0;
-  const slots = () => Math.max(4, size().height - previewHeight() - 14);
+  // One line is kept for the "more" indicator below the list.
+  const slots = () => Math.max(4, size().height - previewHeight() - 15);
   const start = () => {
     const at = selectable()[cursor()] ?? 0;
     return Math.max(0, Math.min(at - Math.floor(slots() / 2), rows().length - slots()));
@@ -100,6 +101,16 @@ export function SettingsDialog(props: { ctx: Context; settings: Accessor<Rainbow
     const s = props.settings();
     const t = findTheme(s.theme);
     return `${t?.name ?? "Custom"}${isCustomized(s) ? " · customized" : ""}${s.enabled ? "" : " · off"}`;
+  };
+  // Names what is scrolled out of view, so nothing in the list is silently hidden.
+  const more = () => {
+    const label = (list: Row[]) => {
+      const items = list.filter((r) => r.kind !== "header").length;
+      const sections = list.flatMap((r) => r.kind === "header" ? [r.text] : []);
+      return items ? `${items} more${sections.length ? `: ${sections.join(", ")}` : ""}` : "";
+    };
+    const above = label(rows().slice(0, start())), below = label(rows().slice(start() + slots()));
+    return [above && `↑ ${above}`, below && `↓ ${below}`].filter(Boolean).join("   ");
   };
   const hint = () => {
     const row = current();
@@ -154,6 +165,7 @@ export function SettingsDialog(props: { ctx: Context; settings: Accessor<Rainbow
         </box>;
       }}</For>
     </box>
+    <text fg={theme.text.muted} wrapMode="none" truncate>{more()}</text>
     <text fg={theme.text.muted} wrapMode="word">{hint()}</text>
     <text fg={theme.text.muted} wrapMode="none">{keys()}</text>
   </box>;

@@ -300,7 +300,19 @@ export class RainbowEngine {
 		// 2. Effect layers. In panels scope, prose gets only foreground colour;
 		// particles and post-effects must not paint the space around it.
 		{
+			const sidebarFx = frame.native && (s.scope === "panels" || s.scope === "screen");
 			const effectsFrame = { ...frame, rows: frame.rows.map((source, y) => {
+					const own = transcriptRow(source, y);
+					// Empty sidebar space takes effects on every row, whatever the
+					// transcript beside it holds. Sidebar text stays out of them.
+					const side = sidebarFx && !source.skip ? source.cells.filter((cell) => cell.region === "sidebar" && cell.blank) : [];
+					if (side.length === 0) return own;
+					const base = own.skip ? { ...source, cells: [], byCol: new Array(source.byCol.length), skip: false, quiet: false } : own;
+					const byCol = base.byCol.slice();
+					for (const cell of side) for (let k = 0; k < cell.width; k++) byCol[cell.col + k] = cell;
+					return { ...base, cells: [...base.cells, ...side].sort((a, b) => a.col - b.col), byCol };
+				}) };
+			function transcriptRow(source: Frame["rows"][number], y: number): Frame["rows"][number] {
 					// Decide skips first: most panels-scope rows never reach an effect.
 					if (source.skip || layout.rowEditor[y] || layout.rowFooter[y] ||
 						s.scope === "panels" && !layout.rowBox[y] && !layout.rowRule[y]) return { ...source, skip: true };
@@ -314,7 +326,7 @@ export class RainbowEngine {
 					const included = (col: number) => isBoxCell(row, col, bounds);
 					return { ...row, cells: row.cells.filter((cell) => included(cell.col)),
 						byCol: row.byCol.map((cell, col) => included(col) ? cell : undefined) };
-				}) };
+			}
 			const ctx: FxContext = {
 				frame: effectsFrame,
 				width,
