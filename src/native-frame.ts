@@ -28,7 +28,42 @@ export class FrameCache {
   private input?: PlaneCopy;
   private output?: PlaneCopy;
 
+  /**
+   * @param hold Colour levels a cell may drift before it is redrawn. Most
+   * ticks move the gradient by a level or two, which no one can see but
+   * which costs a full-screen repaint through the terminal.
+   */
+  constructor(readonly hold = 2) {}
+
   invalidate() { this.key = ""; }
+
+  /**
+   * Keeps the previous output colour of every cell in `rows` whose input is
+   * unchanged and whose new colour is within `hold` levels of it.
+   */
+  holdColours(planes: Planes, input: PlaneCopy, width: number, rows: boolean[] | undefined) {
+    const prevIn = this.input, prevOut = this.output;
+    if (this.hold <= 0 || !prevIn || !prevOut || prevIn.char.length !== input.char.length) return;
+    const near = (plane: Uint16Array, old: Uint16Array, at: number) => {
+      for (let k = 0; k < 3; k++) {
+        const a = plane[at + k]!, b = old[at + k]!;
+        if (a >> 8 !== b >> 8 || Math.abs((a & 255) - (b & 255)) > this.hold) return false;
+      }
+      return plane[at + 3] === old[at + 3];
+    };
+    for (let y = 0; y < input.char.length / width; y++) {
+      if (rows && !rows[y]) continue;
+      for (let i = y * width; i < (y + 1) * width; i++) {
+        const at = i * 4;
+        if (input.char[i] !== prevIn.char[i] || input.attributes[i] !== prevIn.attributes[i]) continue;
+        let same = true;
+        for (let k = 0; k < 4 && same; k++) same = input.fg[at + k] === prevIn.fg[at + k] && input.bg[at + k] === prevIn.bg[at + k];
+        if (!same || planes.char[i] !== prevOut.char[i]) continue;
+        if (near(planes.fg, prevOut.fg, at)) planes.fg.set(prevOut.fg.subarray(at, at + 4), at);
+        if (near(planes.bg, prevOut.bg, at)) planes.bg.set(prevOut.bg.subarray(at, at + 4), at);
+      }
+    }
+  }
 
   /** Rows whose input differs from the cached input, or undefined when the cache can't be used. */
   changedRows(planes: Planes, width: number, key: string): boolean[] | undefined {
@@ -89,6 +124,7 @@ export function processNativeFrame(buffer: Pick<OptimizedBuffer, "buffers" | "wi
       cursor: options.cursor, overlayVisible, advance: options.advance });
     writeFrame(planes, frame, settings);
     if (read && written) for (let y = 0; y < height; y++) if (read[y] && !written[y]) cache!.restoreRow(planes, width, y);
+    if (cache && input) cache.holdColours(planes, input, width, written);
   }
   if (cache && input) cache.store(input, planes, key);
   return count;

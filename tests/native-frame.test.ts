@@ -177,7 +177,7 @@ test("cached redraws match a full redraw and only reprocess rows whose input cha
     const editedRows = frame(edited, false);
     return { same, edited, sameRows, editedRows };
   };
-  const cached = run(new FrameCache());
+  const cached = run(new FrameCache(0));
   const full = run(undefined);
   assert.deepEqual(cached.same, full.same, "unchanged redraw");
   assert.deepEqual(cached.edited, full.edited, "redraw with one changed row");
@@ -212,8 +212,44 @@ test("cached redraws match full redraws for every effect, including ones that re
       frame(edited, false);
       return edited;
     };
-    assert.deepEqual(run(new FrameCache()), run(), `${fx.id} (${inputMode})`);
+    assert.deepEqual(run(new FrameCache(0)), run(), `${fx.id} (${inputMode})`);
   }
+});
+
+test("ticks keep a cell's on-screen colour until it drifts past the threshold", () => {
+  const s = settings({ scope: "screen", motion: "scroll", speed: 0.05, frameBudgetMs: 0 });
+  const source = fixture();
+  for (let x = 0; x < 30; x++) source.char[30 + x] = 65 + x % 26;
+  const engine = new RainbowEngine(s);
+  let now = 5;
+  Object.defineProperty(engine, "now", { get: () => now });
+  const cache = new FrameCache(2);
+  const tick = (edit?: (p: Planes) => void) => {
+    const p = structuredClone(source);
+    edit?.(p);
+    processNativeFrame({ buffers: p, width: 30, height: 6 }, engine, s, { inputMode: "base", regions: [], advance: true, cache });
+    return p;
+  };
+  let shown = tick();
+  let held = 0, moved = 0;
+  for (let t = 1; t <= 24; t++) {
+    now = 5 + t / 12;
+    const next = tick();
+    for (let cell = 0; cell < 30 * 6; cell++) {
+      let d = 0;
+      for (let k = 0; k < 3; k++) d = Math.max(d, Math.abs((next.fg[cell * 4 + k]! & 255) - (shown.fg[cell * 4 + k]! & 255)));
+      if (d === 0) continue;
+      assert.ok(d > 2, `cell ${cell} moved by only ${d}`);
+      moved++;
+    }
+    held += next.fg.filter((v, i) => i % 4 !== 3 && v === shown.fg[i]).length;
+    shown = next;
+  }
+  assert.ok(moved > 0, "the gradient still moves");
+  assert.ok(held > 0, "small steps are held");
+  // A cell whose content changes is always redrawn from scratch.
+  const edited = tick((p) => { p.char[33] = 0x2588; p.fg.set([90, 90, 90, 255], 33 * 4); });
+  assert.notDeepEqual(edited.fg.slice(33 * 4, 34 * 4), shown.fg.slice(33 * 4, 34 * 4));
 });
 
 // A table in the transcript beside the session sidebar, which OpenCode paints
