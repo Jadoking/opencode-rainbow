@@ -79,11 +79,14 @@ export type Layout = {
 function isRuleRow(row: FrameRow): boolean {
 	let rule = 0;
 	let other = 0;
-	for (const cell of row.cells) {
+	const cells = row.cells;
+	for (let i = 0; i < cells.length; i++) {
+		const cell = cells[i]!;
 		const ch = cell.outText;
 		if (ch === " " || ch === "" || beside(cell)) continue;
 		if (RULE_CHARS.has(ch) || CORNER_CHARS.has(ch)) rule++;
-		else other++;
+		// Text rows: even if every remaining cell were a rule glyph it could not reach 60%.
+		else if (++other * 1.5 > rule + cells.length - i - 1) return false;
 	}
 	if (rule < 8) return false;
 	return rule >= (rule + other) * 0.6;
@@ -91,10 +94,13 @@ function isRuleRow(row: FrameRow): boolean {
 
 /** Horizontal extent of an outlined box, including its border cells. */
 export function boxBounds(row: FrameRow): [number, number] | undefined {
-	const edges = row.cells.filter((cell) => !beside(cell) && (EDGE_CHARS.has(cell.text) || CORNER_CHARS.has(cell.text)));
-	const first = edges[0];
-	const last = edges.at(-1);
-	return first && last && first !== last ? [first.col, last.col] : undefined;
+	const cells = row.cells;
+	const edge = (cell: FrameCell) => !beside(cell) && (EDGE_CHARS.has(cell.text) || CORNER_CHARS.has(cell.text));
+	let first = 0;
+	while (first < cells.length && !edge(cells[first]!)) first++;
+	let last = cells.length - 1;
+	while (last > first && !edge(cells[last]!)) last--;
+	return last > first ? [cells[first]!.col, cells[last]!.col] : undefined;
 }
 
 export function isBoxCell(row: FrameRow, col: number, bounds: [number, number] | undefined): boolean {

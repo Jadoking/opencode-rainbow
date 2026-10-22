@@ -12,9 +12,36 @@ const continuation = (cp: number) => (cp >>> 30) === 3;
 const imageCell = (cp: number) => (cp >>> 30) === 1;
 const rgb = (plane: Uint16Array, at: number): RGB => ({ r: plane[at] & 255, g: plane[at + 1] & 255, b: plane[at + 2] & 255 });
 const equal = (a: RGB | null, b: RGB | null) => a === b || !!a && !!b && a.r === b.r && a.g === b.g && a.b === b.b;
-const code = (c: RGB) => `48;2;${c.r};${c.g};${c.b}`;
+// A screen holds a few dozen distinct glyphs and backgrounds; build each string once.
+const codes = new Map<number, string>();
+const code = (c: RGB) => {
+  const key = c.r << 16 | c.g << 8 | c.b;
+  let s = codes.get(key);
+  if (s === undefined) {
+    if (codes.size > 4096) codes.clear();
+    codes.set(key, s = `48;2;${c.r};${c.g};${c.b}`);
+  }
+  return s;
+};
+const glyphs = new Map<number, { text: string; blank: boolean }>();
+const glyph = (cp: number) => {
+  let g = glyphs.get(cp);
+  if (g === undefined) {
+    const text = cp === 0 ? " " : cp <= 0x10ffff ? String.fromCodePoint(cp) : "\ufffc";
+    if (glyphs.size > 4096) glyphs.clear();
+    glyphs.set(cp, g = { text, blank: !text.trim() });
+  }
+  return g;
+};
 
 type PlaneCopy = { char: Uint32Array; fg: Uint16Array; bg: Uint16Array; attributes: Uint32Array };
+
+/** Same colour intent and alpha, and every RGB channel within `hold` levels. */
+function near(plane: Uint16Array, old: Uint16Array, at: number, hold: number): boolean {
+  const r = plane[at]!, g = plane[at + 1]!, b = plane[at + 2]!, or = old[at]!, og = old[at + 1]!, ob = old[at + 2]!;
+  return plane[at + 3] === old[at + 3] && r >> 8 === or >> 8 && g >> 8 === og >> 8 && b >> 8 === ob >> 8 &&
+    Math.abs((r & 255) - (or & 255)) <= hold && Math.abs((g & 255) - (og & 255)) <= hold && Math.abs((b & 255) - (ob & 255)) <= hold;
+}
 const copyPlanes = (p: Planes): PlaneCopy =>
   ({ char: p.char.slice(), fg: p.fg.slice(), bg: p.bg.slice(), attributes: p.attributes.slice() });
 
@@ -42,25 +69,22 @@ export class FrameCache {
    * unchanged and whose new colour is within `hold` levels of it.
    */
   holdColours(planes: Planes, input: PlaneCopy, width: number, rows: boolean[] | undefined) {
-    const prevIn = this.input, prevOut = this.output;
-    if (this.hold <= 0 || !prevIn || !prevOut || prevIn.char.length !== input.char.length) return;
-    const near = (plane: Uint16Array, old: Uint16Array, at: number) => {
-      for (let k = 0; k < 3; k++) {
-        const a = plane[at + k]!, b = old[at + k]!;
-        if (a >> 8 !== b >> 8 || Math.abs((a & 255) - (b & 255)) > this.hold) return false;
-      }
-      return plane[at + 3] === old[at + 3];
-    };
-    for (let y = 0; y < input.char.length / width; y++) {
+    const prevIn = this.input, prevOut = this.output, hold = this.hold;
+    if (hold <= 0 || !prevIn || !prevOut || prevIn.char.length !== input.char.length) return;
+    const { char: inChar, attributes: inAttr, fg: inFg, bg: inBg } = input;
+    const { char: pChar, attributes: pAttr, fg: pFg, bg: pBg } = prevIn;
+    const { char: oChar, fg: oFg, bg: oBg } = prevOut;
+    const { char, fg, bg } = planes;
+    const height = inChar.length / width;
+    for (let y = 0; y < height; y++) {
       if (rows && !rows[y]) continue;
-      for (let i = y * width; i < (y + 1) * width; i++) {
+      for (let i = y * width, end = i + width; i < end; i++) {
+        if (inChar[i] !== pChar[i] || inAttr[i] !== pAttr[i] || char[i] !== oChar[i]) continue;
         const at = i * 4;
-        if (input.char[i] !== prevIn.char[i] || input.attributes[i] !== prevIn.attributes[i]) continue;
-        let same = true;
-        for (let k = 0; k < 4 && same; k++) same = input.fg[at + k] === prevIn.fg[at + k] && input.bg[at + k] === prevIn.bg[at + k];
-        if (!same || planes.char[i] !== prevOut.char[i]) continue;
-        if (near(planes.fg, prevOut.fg, at)) planes.fg.set(prevOut.fg.subarray(at, at + 4), at);
-        if (near(planes.bg, prevOut.bg, at)) planes.bg.set(prevOut.bg.subarray(at, at + 4), at);
+        if (inFg[at] !== pFg[at] || inFg[at + 1] !== pFg[at + 1] || inFg[at + 2] !== pFg[at + 2] || inFg[at + 3] !== pFg[at + 3] ||
+          inBg[at] !== pBg[at] || inBg[at + 1] !== pBg[at + 1] || inBg[at + 2] !== pBg[at + 2] || inBg[at + 3] !== pBg[at + 3]) continue;
+        if (near(fg, oFg, at, hold)) { fg[at] = oFg[at]!; fg[at + 1] = oFg[at + 1]!; fg[at + 2] = oFg[at + 2]!; fg[at + 3] = oFg[at + 3]!; }
+        if (near(bg, oBg, at, hold)) { bg[at] = oBg[at]!; bg[at + 1] = oBg[at + 1]!; bg[at + 2] = oBg[at + 2]!; bg[at + 3] = oBg[at + 3]!; }
       }
     }
   }
@@ -155,7 +179,13 @@ export function readFrame(planes: Planes, width: number, height: number, backgro
     }
     const cells: FrameCell[] = [];
     const byCol: (FrameCell | undefined)[] = new Array(width);
-    const bands = regions.filter((r) => y >= r.y && y < r.y + r.height);
+    // Region kind per column; later regions win, as they are found later in the tree.
+    let kinds: (Region["kind"] | undefined)[] | undefined;
+    for (const r of regions) {
+      if (y < r.y || y >= r.y + r.height) continue;
+      kinds ??= new Array(width);
+      for (let x = Math.max(0, r.x); x < Math.min(width, r.x + r.width); x++) kinds[x] = r.kind;
+    }
     let used = width;
     if (!settings.fullBleed) {
       while (used > 0 && [0, 32].includes(planes.char[y * width + used - 1]) &&
@@ -165,15 +195,16 @@ export function readFrame(planes: Planes, width: number, height: number, backgro
       const i = y * width + x;
       const cp = planes.char[i];
       if (continuation(cp) || imageCell(cp)) continue;
-      const region = bands.findLast((r) => x >= r.x && x < r.x + r.width)?.kind;
+      const region = kinds?.[x];
       const attrs = planes.attributes[i];
       if (region === "protected" || (attrs & (32 | 64)) ||
         region === "input" && (!settings.colorText || !settings.colorInput || settings.scope === "chrome") ||
         (region === "footer" || region === "sidebar") && (!settings.colorText || !settings.colorFooter || settings.scope === "chrome")) continue;
       const cell = padCell(x);
       // Opaque pooled graphemes are treated as ink; their IDs are never rewritten.
-      cell.text = cell.outText = cp === 0 ? " " : cp <= 0x10ffff ? String.fromCodePoint(cp) : "\ufffc";
-      cell.blank = !cell.text.trim();
+      const g = glyph(cp);
+      cell.text = cell.outText = g.text;
+      cell.blank = g.blank;
       while (x + cell.width < width && continuation(planes.char[i + cell.width])) cell.width++;
       cell.fg = cell.outFg = rgb(planes.fg, i * 4);
       cell.bg = cell.outBg = rgb(planes.bg, i * 4);

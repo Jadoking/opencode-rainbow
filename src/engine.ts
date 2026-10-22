@@ -295,13 +295,15 @@ export class RainbowEngine {
 		// particles and post-effects must not paint the space around it.
 		{
 			const effectsFrame = { ...frame, rows: frame.rows.map((source, y) => {
-					const row = frame.native ? { ...source,
+					// Decide skips first: most panels-scope rows never reach an effect.
+					if (source.skip || layout.rowEditor[y] || layout.rowFooter[y] ||
+						s.scope === "panels" && !layout.rowBox[y] && !layout.rowRule[y]) return { ...source, skip: true };
+					const row = frame.native && source.cells.some((cell) => cell.region) ? { ...source,
 						cells: source.cells.filter((cell) => !cell.region),
 						byCol: source.byCol.map((cell) => cell?.region ? undefined : cell),
 					} : source;
-					if (layout.rowEditor[y] || layout.rowFooter[y]) return { ...row, skip: true };
 					if (s.scope !== "panels") return row;
-					if (!layout.rowBox[y]) return layout.rowRule[y] ? row : { ...row, skip: true };
+					if (!layout.rowBox[y]) return row;
 					const bounds = boxBounds(row);
 					const included = (col: number) => isBoxCell(row, col, bounds);
 					return { ...row, cells: row.cells.filter((cell) => included(cell.col)),
@@ -370,6 +372,22 @@ export class RainbowEngine {
 
 	}
 
+	private tinted?: { from: Ramp; vibrance: number; brightness: number; ramp: Ramp };
+
+	private tintedRamp(ramp: Ramp, vibrance: number, brightness: number): Ramp {
+		if (vibrance === 1 && brightness === 0) return ramp;
+		const t = this.tinted;
+		if (t && t.from === ramp && t.vibrance === vibrance && t.brightness === brightness) return t.ramp;
+		const lut = ramp.lut.map((c) => {
+			let col = c;
+			if (vibrance !== 1) col = saturate(col, vibrance);
+			if (brightness !== 0) col = shade(col, brightness);
+			return col;
+		});
+		this.tinted = { from: ramp, vibrance, brightness, ramp: { ...ramp, lut } };
+		return this.tinted.ramp;
+	}
+
 	private cycleRandomPreset(): void {
 		const ids = presetIds();
 		const next = ids[Math.floor(this.rng() * ids.length)] ?? this.settings.preset;
@@ -418,8 +436,9 @@ export class RainbowEngine {
 		const boxBlend = clamp01(s.boxBlend * scale);
 		if ((blend <= 0 && boxBlend <= 0) || (!s.colorText && !s.colorBackground)) return;
 
-		const vib = s.vibrance;
-		const bright = s.brightness;
+		// Vibrance and brightness depend only on the palette entry, so apply them
+		// to the 512-entry ramp once instead of to every cell.
+		const tinted = this.tintedRamp(ramp, s.vibrance, s.brightness);
 		// Backgrounds are a scope decision, not just a setting: `text` mode is
 		// defined by never painting one, and `chrome` only ever hits glyphs.
 		const allowBg = s.colorBackground && scope !== "text" && scope !== "chrome";
@@ -449,9 +468,7 @@ export class RainbowEngine {
 				if (scope === "chrome" && !isChromeGlyph(cell.outText)) continue;
 
 				const phase = fieldPhase(field, cell.col, y);
-				let col = sampleRamp(ramp, phase);
-				if (vib !== 1) col = saturate(col, vib);
-				if (bright !== 0) col = shade(col, bright);
+				const col = sampleRamp(tinted, phase);
 
 				// Background: tint every cell that does not already carry its
 				// own colour. Tinting only the empty cells leaves every word
