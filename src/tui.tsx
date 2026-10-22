@@ -36,6 +36,10 @@ export default Plugin.define({
     const app = ctx.ui.slot({ append: "app", render: () => untrack(() => {
       const engine = new RainbowEngine(settings());
       let suspended = false;
+      // Focus events only report changes, so start from OpenTUI's last known
+      // state (a private field; null until reported). Terminals that never
+      // report focus keep animating.
+      let blurred = (ctx.renderer as unknown as { _terminalFocusState?: boolean | null })._terminalFocusState === false;
       let failed = false;
       let dialogOwned = false;
       const working = () => {
@@ -48,6 +52,7 @@ export default Plugin.define({
       // Redraws reuse the last output for every row OpenCode didn't change.
       const cache = new FrameCache();
       const pump = new AnimationPump(engine, settings, working, () => { tickDue = true; ctx.renderer.requestRender(); });
+      pump.suspended = blurred;
       const activity = (strength = 0) => {
         pump.activity(strength);
         if (strength && settings().reactive) {
@@ -66,13 +71,17 @@ export default Plugin.define({
         setSettings(next);
         engine.updateSettings(next);
         failed = false;
-        pump.suspended = suspended;
+        pump.suspended = suspended || blurred;
         activity();
         tickDue = true;
         cache.invalidate();
         ctx.renderer.requestRender();
       }));
-      const suspend = (value: boolean) => { suspended = value; pump.suspended = value; pump.refresh(); ctx.renderer.requestRender(); };
+      const suspend = (value: boolean) => { suspended = value; pump.suspended = value || blurred; pump.refresh(); ctx.renderer.requestRender(); };
+      // An unfocused pane keeps its last colours but stops animating; OpenCode's
+      // own redraws there replay the frozen frame from the cache.
+      const blur = () => { blurred = true; pump.suspended = true; pump.refresh(); };
+      const focus = () => { blurred = false; pump.suspended = suspended || failed; activity(); ctx.renderer.requestRender(); };
       const showDialog = (splash: boolean) => {
         ctx.ui.dialog.clear();
         suspend(true);
@@ -86,7 +95,7 @@ export default Plugin.define({
         settings: () => showDialog(false), splash: () => showDialog(true),
         status: () => {
           const stats = engine.getStats();
-          return `enabled=${settings().enabled}, attached=${!failed}, fullscreen=${ctx.renderer.screenMode === "alternate-screen"}, input=${ctx.keymap.mode.current()}\n` +
+          return `enabled=${settings().enabled}, attached=${!failed}, fullscreen=${ctx.renderer.screenMode === "alternate-screen"}, input=${ctx.keymap.mode.current()}, focused=${!blurred}\n` +
             `${settings().preset} · ${settings().scope} · ${settings().mode}/${settings().motion}\n` +
             `${engine.activeFxIds().length} effects · ${pump.fps} fps · ${stats.frames} frames\n` +
             `${stats.lastMs.toFixed(1)}ms last / ${stats.avgMs.toFixed(1)}ms average · quality ${stats.quality.toFixed(2)} · ${stats.dropped} over-budget frames`;
@@ -123,6 +132,8 @@ export default Plugin.define({
       ctx.renderer.keyInput.on("keypress", key);
       ctx.renderer.keyInput.on("paste", paste);
       ctx.renderer.on("mouse", mouse);
+      ctx.renderer.on("blur", blur);
+      ctx.renderer.on("focus", focus);
       const stop = ctx.data.listen(({ details }) => {
         const route = ctx.ui.router.current();
         if (route.type !== "session") return;
@@ -139,6 +150,8 @@ export default Plugin.define({
         ctx.renderer.keyInput.off("keypress", key);
         ctx.renderer.keyInput.off("paste", paste);
         ctx.renderer.off("mouse", mouse);
+        ctx.renderer.off("blur", blur);
+        ctx.renderer.off("focus", focus);
         ctx.renderer.removePostProcessFn(process);
         engine.resetState();
         if (!ctx.renderer.isDestroyed) ctx.renderer.requestRender();
